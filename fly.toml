@@ -1,0 +1,23 @@
+# Fly.io settings for Insula World. One always-on machine with a 1 GB disk for the save file.
+app = "insula-world"
+primary_region = "iad"
+
+[env]
+  PORT = "8080"
+  INSULA_SAVE = "/data/world.json"
+
+[[mounts]]
+  source = "insula_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # The island never sleeps: keep the machine running even with no visitors.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

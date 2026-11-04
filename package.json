@@ -1,0 +1,37 @@
+{
+  "name": "insula",
+  "version": "1.0.0",
+  "description": "Insula World: an autonomous agent economy on Solana.",
+  "main": "index.js",
+  "scripts": {
+    "test": "node test/transfer.test.js && node test/token2022.test.js",
+    "start": "node server/index.js",
+    "setup": "node server/setup.js",
+    "setup:mainnet": "node server/setup-mainnet.js",
+    "setup:robinhood": "node server/setup-robinhood.js",
+    "mock": "node server/index.js --mock",
+    "fast": "node server/index.js --mock --fast",
+    "preview": "esbuild demo/entry.js --bundle --minify --format=iife --define:process.env={} --outfile=demo/bundle.js",
+    "secrets": "node server/secrets.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@solana/spl-token": "^0.4.15",
+    "@solana/web3.js": "^1.99.0",
+    "bs58": "^6.0.0",
+    "ethers": "^6.17.0",
+    "express": "^5.3.0",
+    "three": "^0.160.0",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "solana-bankrun": "^0.4.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
