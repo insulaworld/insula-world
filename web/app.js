@@ -1007,6 +1007,20 @@ function flyCoins(from, to, amount, onLand) {
     flights.push({ mesh, from: from.clone(), to, t: -i * 0.07, dur: 1.15, onLand: i === n - 1 ? onLand : null, wobble: Math.random() * 6 });
   }
 }
+// Stolen goods: small item-coloured blocks that slip from the victim to the thief.
+const goodGeo = new THREE.BoxGeometry(0.4, 0.4, 0.4);
+const goodMats = {};
+const ITEM_HEX = { fish: 0x3987e5, wood: 0xd95926, ore: 0x8f969e, grain: 0xe0b23a };
+function flyGoods(from, to, color, n) {
+  const mat = (goodMats[color] ||= new THREE.MeshStandardMaterial({ color, roughness: 0.6 }));
+  for (let i = 0; i < n; i++) {
+    const mesh = new THREE.Mesh(goodGeo, mat);
+    mesh.castShadow = true;
+    mesh.visible = false;
+    scene.add(mesh);
+    flights.push({ mesh, from: from.clone(), to, t: -i * 0.14, dur: 0.85, quiet: true, wobble: Math.random() * 6 });
+  }
+}
 function stepFlights(dt) {
   for (let i = flights.length - 1; i >= 0; i--) {
     const f = flights[i];
@@ -1021,8 +1035,7 @@ function stepFlights(dt) {
     f.mesh.position.copy(p);
     f.mesh.rotation.set(Math.PI / 2 + Math.sin(f.t * 8 + f.wobble) * 0.4, f.t * 9, 0);
     if (k >= 1) {
-      burst(to, 0xffc94d, 4, 2.2, -6, 0.5);
-      sound.clink(earVolume(to));
+      if (!f.quiet) { burst(to, 0xffc94d, 4, 2.2, -6, 0.5); sound.clink(earVolume(to)); }
       scene.remove(f.mesh);
       flights.splice(i, 1);
       f.onLand?.();
@@ -1063,10 +1076,10 @@ function renderCard(rec) {
     <div class="row"><div class="who"><span class="swatch" style="background:${a.color}"></span><div><div class="name">${a.name}</div><div class="role">${a.species} · ${a.job}</div></div></div></div>
     <div class="bal">${fmt(a.balance)}<small>COINS</small></div>
     <div class="task">${a.task}</div>
-    <div class="chips"><span>${a.inv.ore} ore</span><span>${a.inv.fish} fish</span><span>${a.inv.wood} wood</span></div>
+    <div class="chips"><span>${a.inv.ore} ore</span><span>${a.inv.fish} fish</span><span>${a.inv.wood} wood</span>${latest?.items?.includes('grain') ? `<span>${a.inv.grain || 0} grain</span>` : ''}</div>
     ${rec.extras || ''}
     <div class="meter">HUNGER <div class="bar"><div style="width:${a.hunger * 10}%;background:${hc}"></div></div> ${a.hunger}/10</div>
-    <div class="row">${a.accountUrl ? `<a href="${a.accountUrl}" target="_blank" rel="noopener">${addr} ↗</a>` : `<a>${addr}</a>`}</div>`;
+    <div class="row">${a.accountUrl ? `<a href="${a.accountUrl}" target="_blank" rel="noopener">${addr} ↗</a>` : `<a>${addr}</a>`}<button type="button" class="prof-btn mono" data-profile="${a.id}">PROFILE</button></div>`;
   if (html !== rec.cardHtml) {
     rec.card.innerHTML = html;
     rec.cardHtml = html;
@@ -1407,6 +1420,8 @@ $('#feed .feed-head').addEventListener('click', (ev) => {
 // Tapping an agent's card follows that agent with the camera (tap again to go back to the island).
 $('#agents').addEventListener('click', (ev) => {
   const card = ev.target.closest('.card');
+  const prof = ev.target.closest('[data-profile]');
+  if (prof) { window.insulaProfile?.(prof.dataset.profile); return; }
   if (!card || ev.target.closest('a')) return;
   const id = [...agents.entries()].find(([, r]) => r.card === card)?.[0];
   if (!id) return;
@@ -1420,7 +1435,7 @@ function addFeed(e, animate = true) {
   if (e.type === 'log' && /couldn.t agree/.test(e.text || '')) return;
   const li = document.createElement('li');
   if (e.type === 'log' || e.type === 'era') {
-    li.className = 'log';
+    li.className = /went missing|caught \w+ stealing/.test(e.text || '') ? 'log theft' : /refused to trade/.test(e.text || '') ? 'log grudge' : 'log';
     li.textContent = e.text;
   } else if (e.type === 'chainError') {
     li.className = 'err';
@@ -1457,7 +1472,26 @@ function chest(rec) {
   return rec.pos.clone().add(new THREE.Vector3(0, 1.4, 0));
 }
 
+// A theft: a puff of smoke at the victim, their goods slip over to the thief, and a red "−3 ore" floats up.
+// If the thief is caught, a red flash on the thief instead.
+function theftFx(e) {
+  const th = agents.get(e.thief), vi = agents.get(e.victim);
+  if (!th || !vi) return;
+  const at = chest(vi);
+  burst(at.clone().add(new THREE.Vector3(0, 0.4, 0)), 0x45484f, 26, 2.6, 1.4, 1.4, 2.4);
+  sound.swish(earVolume(at));
+  if (e.caught) {
+    burst(chest(th), 0xff3b3b, 14, 3, -6, 0.6);
+    coinPop(th, 'CAUGHT!', true);
+    return;
+  }
+  flyGoods(at, () => chest(th), ITEM_HEX[e.item] || 0xcccccc, Math.max(1, Math.min(3, e.n || 2)));
+  coinPop(vi, `−${e.n} ${e.item}`, true);
+}
+
 function onEvent(e) {
+  if (e.type === 'story' && e.kind === 'theft') { theftFx(e); return; }
+  if (e.type === 'story' && e.kind === 'refuse') { const r = agents.get(e.from); if (r) coinPop(r, 'REFUSED', true); return; }
   if (e.type === 'thought') { addThought(e); return; }
   if (e.type === 'decision') {
     decisionCache.set(e.record.id, e.record);

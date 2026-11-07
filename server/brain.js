@@ -16,7 +16,7 @@ export const LLM_ON = Boolean(API_KEY) && (typeof process === 'undefined' || pro
 
 // What each kind of agent is driven to do. Without this, AI agents play it too safe: work, sell, eat, repeat.
 const ROLE_DRIVE = {
-  default: 'Coins sitting idle earn nothing: the agents who get rich invest in a house, then a workshop, and chip in to public projects that raise prices for everyone.',
+  default: 'Idle coins earn nothing; the rich invest in a house, then a workshop, and fund public projects.',
   builder: 'You earn from building contracts. Buy or import the materials you need, finish jobs fast, and build your own house and workshop when you have no customers.',
   banker: 'You earn from interest. Money sitting in your vault earns nothing; a loan out to a good borrower is money working.',
   mayor: 'Your job is to grow the town: spend the tax treasury on public projects, and keep the island fair.',
@@ -36,7 +36,7 @@ function warnOnce(msg) {
   }
   warned.set(msg, w);
 }
-const usage = { input: 0, output: 0, failed: 0, since: Date.now(), byKind: {}, ruleShortcuts: 0 };
+const usage = { input: 0, output: 0, failed: 0, since: Date.now(), byKind: {}, ruleShortcuts: 0, badChoices: 0 };
 export const llmStats = () => ({ on: LLM_ON, model: LLM_ON ? MODEL : null, calls: llmCalls });
 export const llmUsage = () => ({ calls: llmCalls, ...usage });
 
@@ -105,12 +105,11 @@ async function askLLM(agent, situation, schema, kind) {
   if (!LLM_ON) return null;
   try {
     return await callModel(
-      `You are ${agent.name}, a ${agent.species}, an autonomous AI agent living in Insula: an island economy run entirely by AI agents, ` +
-        `with no humans in the loop. Every coin you hold is a real token on ${process.env.INSULA_NETWORK || 'the blockchain'}, in your own wallet. ` +
-        `${agent.personality}\nYour goals: stay fed, grow your wealth, and keep good relationships. ${ROLE_DRIVE[agent.role] || ROLE_DRIVE.default} ` +
-        'Think like a real economic actor: prices, who needs what, your strengths, the long run. ' +
-        'Reply with ONLY a JSON object. "thought": your private reasoning, ONE short sentence of at most 20 words, first person, with a specific number. ' +
-        '"say": what you say out loud, under 10 words, in character.',
+      `You are ${agent.name} the ${agent.species}, an autonomous AI agent in Insula, an island economy run only by AI agents. ` +
+        `Your coins are real tokens in your own wallet. ${agent.personality}\n` +
+        `Goals: stay fed, grow your wealth, keep good relationships. ${ROLE_DRIVE[agent.role] || ROLE_DRIVE.default} ` +
+        'Think like a real economic actor. Reply with ONLY JSON. "thought": private reasoning, one sentence, max 20 words, first person, with a number. ' +
+        '"say": spoken aloud, under 10 words, in character.',
       `${situation}\n\nRespond as JSON: ${schema}`,
       undefined,
       undefined,
@@ -159,26 +158,28 @@ function spoilNote(ctx) {
 function investNote(ctx) {
   const has = (t) => ctx.owns?.some((b) => b.startsWith(t));
   const notes = [];
-  if (!has('house') && !ctx.pendingJob) notes.push('no house yet: a house makes your hunger rise about half as fast, so you spend far less on food');
-  else if (!has('workshop') && !ctx.pendingJob) notes.push('no workshop yet: a workshop makes you 25% faster at every job');
-  if (ctx.projects?.length) notes.push(`public projects need funding (${ctx.projects.map((p) => p.label).join(', ')}); finished ones help everyone, you included`);
-  if (ctx.self.coins > 1200) notes.push(`${r(ctx.self.coins)} coins sitting idle earn nothing`);
+  if (!has('house') && !ctx.pendingJob) notes.push('no house yet (hunger rises half as fast with one)');
+  else if (!has('workshop') && !ctx.pendingJob) notes.push('no workshop yet (+25% speed at every job)');
+  if (ctx.projects?.length) notes.push(`public projects need funding (${ctx.projects.map((p) => p.label).join(', ')}), which helps everyone`);
+  if (ctx.self.coins > 1200) notes.push(`${r(ctx.self.coins)} coins idle`);
   return notes.length ? `\nINVESTING: ${notes.join('; ')}.` : '';
 }
 
 function describe(ctx, short = false) {
   const s = ctx.self;
   const items = ctx.items;
-  const others = ctx.others.map((o) => `${o.name}${o.role ? ` (${o.role})` : ''}: ${r(o.coins)}c, ${invShort(o.inv, items)}`).join('; ');
-  const market = items.map((k) => `${k} ${ctx.market[k]} (fair ${PRICES[k].fair}, mainland ${ml(ctx, k)})`).join(', ');
+  const others = ctx.others.map((o) => `${o.name}${o.role ? ` (${o.role})` : ''} ${r(o.coins)}c ${items.filter((i) => o.inv[i]).map((i) => `${i}${o.inv[i]}`).join(' ') || '-'}`).join('; ');
+  const market = items.map((k) => `${k} ${ctx.market[k]}/${PRICES[k].fair}/${ml(ctx, k)}`).join(', ');
   const food = Object.entries(ctx.food).filter(([k]) => items.includes(k)).map(([k, v]) => `${k} -${v}`).join(', ');
   return (
     `Day ${ctx.day}${ctx.night ? ', night' : ''}. YOU: ${r(s.coins)} coins; ${invShort(s.inv, items)}; hunger ${s.hunger}/10 (eating: ${food}); ` +
-    `skill ${items.map((i) => `${i} x${(+s.skills[i]).toFixed(1)}`).join(', ')}.` +
+    `best at ${items.slice().sort((a, b) => s.skills[b] - s.skills[a])[0]}.` +
     (short ? '' : `\nOTHERS: ${others}.`) +
-    `\nPRICES: ${market}.` +
-    (short ? '' : `\nNEWS: ${ctx.news.slice(-3).join(' | ') || 'quiet'}.`) +
+    `\nPRICES (island/fair/mainland): ${market}.` +
+    (short ? '' : `\nNEWS: ${ctx.news.slice(-2).join(' | ') || 'quiet'}.`) +
     (ctx.memory.length ? `\nMEMORY: ${[...new Set(ctx.memory.slice(-5))].slice(-3).join(' | ')}.` : '') +
+    (ctx.grudges?.length ? `\nGRUDGES: ${ctx.grudges.map((g) => `${g.name} has been stealing from you`).join('; ')}. You don't trust them.` : '') +
+    (ctx.watchedBy?.length ? `\nWATCHING YOU: ${ctx.watchedBy.join(', ')}. They know you've been robbing them and keep watch at night, so they're likelier to catch you.` : '') +
     (ctx.loan ? `\nLOAN: you owe ${ctx.loan.owed}, due in ${Math.max(0, r((ctx.loan.due - Date.now()) / 1000))}s or your goods get seized.` : '') +
     (ctx.owns?.length ? `\nYOU OWN: ${ctx.owns.join(', ')}.` : '') +
     (short ? '' : investNote(ctx)) +
@@ -214,36 +215,54 @@ function situation(ctx) {
   ].join('|');
 }
 
-// The move menu, compressed: "sell fish to Bruno", "sell fish to Felix"... become one line with a list of
-// names. Same choices, a fraction of the tokens, and the menu stays short however many agents arrive.
+// The move menu, compressed: one line per kind of move, listing the items and neighbors it applies to, so
+// "sell fish to Bruno", "sell fish to Felix", "sell wood to Bruno"... become a single line. Same choices,
+// far fewer tokens (every token is paid for on every decision), and it stays short as the island grows.
+const num = (re, str) => (str.match(re) || [])[1];
 function menu(options) {
-  const groups = new Map();
-  const lines = [];
-  const mainland = { import: [], export: [] };
+  const by = new Map();
+  const order = [];
   for (const o of options) {
-    if (o.action === 'import' || o.action === 'export') {
-      if (!mainland[o.action].length) lines.push(o.action);
-      mainland[o.action].push(`${o.item} ${(o.label.match(/at (\d+) each/) || [])[1] ?? '?'}`);
-      continue;
-    }
-    if (o.with && o.id.endsWith(`:${o.with}`)) {
-      const key = o.id.slice(0, -o.with.length) + '<who>';
-      if (!groups.has(key)) {
-        const label = o.label.replace(o.withName, '<who>').replace(/\s*\((they|you) have \d+\)/, (m) => (m.includes('you') ? m : ''));
-        groups.set(key, { label, who: [] });
-        lines.push(key);
-      }
-      groups.get(key).who.push(['buy', 'steal'].includes(o.action) && o.maxQty ? `${o.with} (has ${o.maxQty})` : o.with);
-    } else lines.push(o);
+    if (!by.has(o.action)) { by.set(o.action, []); order.push(o.action); }
+    by.get(o.action).push(o);
   }
-  const MAINLAND_LINE = {
-    import: (list) => `- import:<item>: buy from the mainland, always in stock but pricey; <item> = ${list.join(', ')} each`,
-    export: (list) => `- export:<item>: ship to the mainland (the price drops as more is shipped); <item> = ${list.join(', ')} each`,
+  // Group a move kind by item, then list who: "fish (you have 7): felix, penny; wood (you have 30): bruno".
+  const perItem = (list, fmt) => {
+    const items = new Map();
+    for (const o of list) { if (!items.has(o.item)) items.set(o.item, []); items.get(o.item).push(o); }
+    return [...items.entries()].map(([item, os]) => fmt(item, os)).join('; ');
   };
-  return lines
-    .map((l) => (l === 'import' || l === 'export' ? MAINLAND_LINE[l](mainland[l])
-      : typeof l === 'string' ? `- ${l}: ${groups.get(l).label}; <who> = ${groups.get(l).who.join(', ')}` : `- ${l.id}: ${l.label}`))
-    .join('\n');
+  const out = [];
+  for (const action of order) {
+    const list = by.get(action);
+    if (action === 'work') out.push(`- work:<item>: gather it yourself; per minute for you: ${list.map((o) => `${o.item} ${num(/about ([\d.]+)/, o.label) ?? '?'}`).join(', ')}`);
+    else if (action === 'eat') out.push(`- eat:<item>: eat; ${list.map((o) => `${o.item} (have ${o.maxQty}, -${num(/removes (\d+)/, o.label) ?? '?'} hunger each)`).join(', ')}`);
+    else if (action === 'sell') {
+      // Items that go to the same buyers share one list of names.
+      const buyers = new Map();
+      for (const o of list) { if (!buyers.has(o.item)) buyers.set(o.item, { have: o.maxQty, who: [] }); buyers.get(o.item).who.push(o.with); }
+      const sets = new Map();
+      for (const [item, b] of buyers) { const k = b.who.join(', '); if (!sets.has(k)) sets.set(k, []); sets.get(k).push(`${item} (you have ${b.have})`); }
+      out.push(`- sell:<item>:<who>: sell to a neighbor, lots of 6+; ${[...sets].map(([who, items]) => `${items.join(', ')} to ${who}`).join('; ')}`);
+    }
+    else if (action === 'buy') out.push(`- buy:<item>:<who>: buy from a neighbor, lots of 6+; ${perItem(list, (item, os) => `${item} from ${os.map((o) => `${o.with} (has ${o.maxQty})`).join(', ')}`)}`);
+    else if (action === 'steal') out.push(`- steal:<item>:<who>: quietly take it in the dark; ${perItem(list, (item, os) => `${item} from ${os.map((o) => `${o.with} (has ${o.maxQty})`).join(', ')}`)}`);
+    else if (action === 'export') out.push(`- export:<item>: ship to the mainland (price drops as more ships); ${list.map((o) => `${o.item} ${num(/at (\d+) each/, o.label) ?? '?'}`).join(', ')} each`);
+    else if (action === 'import') out.push(`- import:<item>: buy from the mainland, pricey; ${list.map((o) => `${o.item} ${num(/at (\d+) each/, o.label) ?? '?'}`).join(', ')} each`);
+    else {
+      // Everything else: per-neighbor moves grouped as before, one-offs as their own line.
+      const groups = new Map();
+      for (const o of list) {
+        if (o.with && o.id.endsWith(`:${o.with}`)) {
+          const key = o.id.slice(0, -o.with.length) + '<who>';
+          if (!groups.has(key)) groups.set(key, { label: o.label.replace(o.withName, '<who>').replace(/they have \d+ coins; /, ''), who: [] });
+          groups.get(key).who.push(o.with);
+        } else out.push(`- ${o.id}: ${o.label}`);
+      }
+      for (const [key, g] of groups) out.push(`- ${key}: ${g.label}; <who> = ${g.who.join(', ')}`);
+    }
+  }
+  return out.join('\n');
 }
 
 export async function decide(agent, ctx, options) {
@@ -282,8 +301,8 @@ export async function decide(agent, ctx, options) {
   }
   const llm = await askLLM(
     agent,
-    `${describe(ctx)}\n\nWhat next? Options (for a line with <who> or <item>, answer its id with one listed value in its place, e.g. sell:fish:bruno):\n${menu(options)}`,
-    '{"thought": string, "choice": one option id, "qty": number (for trades, exports, eating, donations, loans), "price": number per unit (for trades) or total budget (for hiring), "say": string}',
+    `${describe(ctx)}\n\nWhat next? Fill in <item>/<who> from the line, e.g. sell:fish:bruno.\n${menu(options)}`,
+    '{"thought": string, "choice": option id, "qty": number, "price": number (per unit for trades, total for hiring), "say": string}',
     'decide',
   );
   const chosen = llm && options.find((o) => o.id === llm.choice);
@@ -292,6 +311,8 @@ export async function decide(agent, ctx, options) {
     const qty = clamp(r(+llm.qty || chosen.maxQty || 1), 1, chosen.maxQty || 99999);
     return { option: chosen, qty, price: Number.isFinite(+llm.price) ? r(+llm.price) : null, thought: llm.thought, say: llm.say, brain: MODEL };
   }
+  // The AI answered, but with a move that isn't on the menu: counted, so a confusing menu shows up in /api/usage.
+  if (llm) usage.badChoices++;
   agent._plan = null;
   return fallbackDecide(agent, ctx, options);
 }
@@ -596,7 +617,8 @@ export async function respond(agent, proposer, side, item, qty, price, ctx) {
     return { decision: 'reject', say: `Don't have ${qty} ${item}.`, thought: `They want ${qty} ${item} but I've only got ${ctx.self.inv[item] || 0}.` };
   }
   // Clear-cut offers (an obvious bargain, or an obvious insult) get the rule brain's answer; the AI handles close calls.
-  const rule = ruleRespond(agent, buying, item, price, ctx);
+  const grudge = ctx.grudges?.some((g) => g.id === proposer.id);
+  const rule = ruleRespond(agent, buying, item, price, ctx, grudge);
   if (LLM_ON && rule.clear) { usage.ruleShortcuts++; return rule; }
   const llm = await askLLM(
     agent,
@@ -611,9 +633,10 @@ export async function respond(agent, proposer, side, item, qty, price, ctx) {
   return rule;
 }
 
-function ruleRespond(agent, buying, item, price, ctx) {
+function ruleRespond(agent, buying, item, price, ctx, grudge = false) {
   const p = PRICES[item];
-  const v = valueOf(agent, ctx, item);
+  // With someone you don't trust you buy cheaper and sell dearer.
+  const v = valueOf(agent, ctx, item) * (grudge ? (buying ? 0.82 : 1.25) : 1);
   if (buying) {
     const max = v * 1.05;
     if (price <= max && (Math.random() > agent.haggle * 0.7 || price <= v * 0.8)) {

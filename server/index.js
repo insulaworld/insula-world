@@ -91,6 +91,23 @@ try {
   if (n) console.log(`Relationships: rebuilt ${n} past interactions from the decision files.`);
 } catch (e) { console.error('[relations] backfill', e.message); }
 sim.on((e) => { try { relations.record(e); } catch {} });
+// First run with grudges: victims of thefts before grudges existed half-remember who did it.
+try {
+  const thieves = Object.values(sim.agents).filter((a) => a.role === 'thief');
+  if (thieves.length && !Object.values(sim.agents).some((a) => Object.keys(a.grudges || {}).length)) {
+    let seeded = 0;
+    for (const [k, p] of Object.entries(relations.data.pairs)) {
+      if (!p.thefts) continue;
+      const [a, b] = k.split('|');
+      const thief = thieves.find((t) => t.id === a || t.id === b);
+      const victim = thief && sim.agents[thief.id === a ? b : a];
+      if (!victim) continue;
+      victim.grudges[thief.id] = { n: Math.min(20, p.thefts * 0.5), last: Date.now() - 6 * 3600_000 };
+      seeded++;
+    }
+    if (seeded) console.log(`Grudges: ${seeded} inhabitants remember being robbed.`);
+  }
+} catch (e) { console.error('[grudges] seed', e.message); }
 globalThis.saveRelations = () => relations.save();
 setInterval(() => { try { relations.save(); } catch (e) { console.error('[relations]', e.message); } }, 30_000);
 app.get('/api/relations', (_req, res) => res.json(relations.summary()));
@@ -111,7 +128,11 @@ app.get('/api/decisions/:id', (req, res) => {
 });
 app.get('/api/decisions', (req, res) => {
   const limit = Math.min(500, Number(req.query.limit) || 50);
-  res.json([...sim.decisionLog.values()].filter((r) => r.hash).slice(-limit).reverse());
+  // ?agent=<id>: that agent's recent decisions, including ones that moved no money (for the profiles).
+  const agent = typeof req.query.agent === 'string' ? req.query.agent : null;
+  const keep = agent ? (r) => r.agent === agent : (r) => r.hash;
+  res.json([...sim.decisionLog.values()].filter(keep).slice(-limit).reverse()
+    .map(({ canonical, ...r }) => (agent ? r : { canonical, ...r })));
 });
 app.get('/decisions', (_req, res) => res.redirect('/api/decisions?limit=500'));
 
@@ -178,6 +199,8 @@ function usageReport() {
     costPer30Days: pin || pout ? +((cost / hours) * 24 * 30).toFixed(2) : null,
     // Answers the rule brain gave instead of the AI because they were clear-cut (an obvious yes or no).
     ruleShortcuts: u.ruleShortcuts,
+    // AI answers that picked a move not on the menu (the rule brain decided instead).
+    badChoices: u.badChoices ?? 0,
     // Where the AI spend goes, by kind of call, most expensive first.
     byKind: Object.fromEntries(Object.entries(u.byKind)
       .map(([k, v]) => [k, { calls: v.calls, failed: v.failed, tokensPerCall: v.calls ? Math.round((v.input + v.output) / v.calls) : 0, cost: +((v.input * pin + v.output * pout) / 1e6).toFixed(4), share: cost ? `${Math.round(((v.input * pin + v.output * pout) / 1e6 / cost) * 100)}%` : null }])
@@ -191,6 +214,79 @@ app.get('/api/usage', (_req, res) => res.json(usageReport()));
 const SAMPLES = SAVE.replace(/\.json$/, '') + '.samples.jsonl';
 const USAGE = SAVE.replace(/\.json$/, '') + '.usage.json';
 let chainErrors = 0;
+function gasNow() {
+  if (!chain.eth) return null;
+  const eth = (w) => Number(w || 0n) / 1e18;
+  return { bank: +eth(chain.eth.bank).toFixed(6), all: +Object.values(chain.eth).reduce((t, w) => t + eth(w), 0).toFixed(6) };
+}
+
+// The economy dashboard: the minute log, thinned to one point every 10 minutes (the latest point is always
+// kept), plus per-day totals. Only this island's history counts (samples from before genesis, e.g. old test
+// runs in the same file, are skipped). The log is read incrementally, so a long run never re-reads it all.
+const econLog = { offset: 0, rest: '', rows: [] };
+function readNewSamples() {
+  let fd;
+  try { fd = fs.openSync(SAMPLES, 'r'); } catch { return; }
+  try {
+    const size = fs.fstatSync(fd).size;
+    if (size < econLog.offset) Object.assign(econLog, { offset: 0, rest: '', rows: [] }); // file replaced
+    if (size === econLog.offset) return;
+    const buf = Buffer.alloc(size - econLog.offset);
+    fs.readSync(fd, buf, 0, buf.length, econLog.offset);
+    econLog.offset = size;
+    const lines = (econLog.rest + buf.toString('utf8')).split('\n');
+    econLog.rest = lines.pop();
+    for (const l of lines) {
+      if (!l) continue;
+      let r; try { r = JSON.parse(l); } catch { continue; }
+      const t = Date.parse(r.at);
+      if (!(t >= sim.genesis)) continue;
+      econLog.rows.push({
+        t, day: r.day, trades: r.trades, gdp: r.gdp, bank: r.bank, gini: r.gini, built: r.built, prices: r.prices || null, eth: r.eth || null,
+        coins: r.agents ? Object.fromEntries(Object.entries(r.agents).map(([id, a]) => [id, a.coins])) : null,
+      });
+    }
+  } finally { fs.closeSync(fd); }
+}
+let econCache = null;
+function economyReport() {
+  if (econCache && Date.now() - econCache.at < 120_000) return econCache.data;
+  try { readNewSamples(); } catch (e) { console.error('[economy]', e.message); }
+  const rows = econLog.rows;
+  const STEP = 10 * 60_000;
+  const points = [];
+  let lastBucket = -1;
+  rows.forEach((r, i) => {
+    const b = Math.floor(r.t / STEP);
+    if (b === lastBucket && i !== rows.length - 1) return;
+    lastBucket = b;
+    points.push(r);
+  });
+  // Per island day: trades made and money moved (GDP), from the last sample of each day.
+  const days = new Map();
+  for (const r of rows) {
+    const d = days.get(r.day) || { day: r.day, first: r, last: r };
+    d.last = r; days.set(r.day, d);
+  }
+  const byDay = [...days.values()].map((d, i, all) => {
+    const prev = all[i - 1]?.last || { trades: 0, gdp: 0 };
+    return { day: d.day, trades: d.last.trades - prev.trades, gdp: Math.round(d.last.gdp - prev.gdp), built: d.last.built };
+  });
+  // Gas runway: ETH spent across all wallets over the last ~12 hours, ignoring top-ups from outside.
+  let gas = gasNow();
+  if (gas) {
+    const recent = rows.filter((r) => r.eth && r.t > Date.now() - 12 * 3600_000);
+    let spent = 0;
+    for (let i = 1; i < recent.length; i++) spent += Math.max(0, recent[i - 1].eth.all - recent[i].eth.all);
+    const hrs = recent.length > 1 ? (recent.at(-1).t - recent[0].t) / 3600_000 : 0;
+    const perDay = hrs >= 1 ? (spent / hrs) * 24 : null;
+    gas = { ...gas, perDay: perDay != null ? +perDay.toFixed(6) : null, daysLeft: perDay ? +(gas.all / perDay).toFixed(1) : null };
+  }
+  const data = { points, byDay, gas };
+  econCache = { at: Date.now(), data };
+  return data;
+}
+app.get('/api/economy', (_req, res) => res.json(economyReport()));
 sim.on((e) => { if (e.type === 'chainError') chainErrors++; });
 function gini(xs) {
   const v = xs.slice().sort((a, b) => a - b);
@@ -210,6 +306,8 @@ setInterval(() => {
       built: st.economy.built, loanBook: st.economy.loanBook, defaults: st.economy.defaults, thefts: st.economy.thefts,
       starving: st.agents.filter((a) => a.hunger >= 9).length, eras: st.eras.filter((e) => e.unlocked).length,
       projectsDone: st.projects.filter((p) => p.status === 'done').length, chainErrors, ai: usageReport(),
+      // Gas money (ETH) the bank holds, and the total across every wallet, for the gas runway on the dashboard.
+      eth: gasNow(),
       // For the economy charts: island prices, what the mainland pays, each agent's wallet and stock,
       // and their building levels (a workshop upgrade is the only thing that raises an agent's output).
       prices: Object.fromEntries(st.items.map((i) => [i, st.market[i]?.last])),

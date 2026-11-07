@@ -105,7 +105,12 @@ export class Relations {
     const out = {};
     for (const [k, p] of Object.entries(this.data.pairs)) {
       const good = p.trades + p.contracts * 2 + p.repaid * 3, bad = p.noDeals * 0.5 + p.defaults * 6 + p.thefts * 4;
-      out[k] = { ...p, trust: Math.round((100 * (good + 1)) / (good + bad + 2)), rivalry: Math.min(100, Math.round(p.noDeals * 2 + p.thefts * 15 + p.defaults * 10)) };
+      // Rivalry: how often they walk away from each other (as a share of their haggles, with a small prior so
+      // a handful of haggles can't max it out), plus thefts with diminishing weight, plus defaults. Walk-aways
+      // alone top out around 80, so only real wrongdoing pushes a pair to the top.
+      const walkRate = p.noDeals / (p.trades + p.noDeals + 10);
+      const rivalry = walkRate * 80 + 60 * (1 - Math.exp(-p.thefts / 3)) + Math.min(30, p.defaults * 10);
+      out[k] = { ...p, trust: Math.round((100 * (good + 1)) / (good + bad + 2)), rivalry: Math.min(100, Math.round(rivalry)) };
     }
     return { since: this.data.since, backfilled: this.data.backfilled, pairs: out, given: this.data.given };
   }

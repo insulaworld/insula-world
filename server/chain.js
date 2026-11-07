@@ -38,7 +38,7 @@ function memoBytes(memo) {
 
 // One trade = one transaction: the token transfer plus a memo that says what the deal was,
 // so anyone can read the story of the island on Solscan. The bank pays the network fee.
-// tokenProgram: the classic SPL Token program, or Token-2022 (pump.fun's newer coins use it).
+// tokenProgram: the classic SPL Token program, or Token-2022.
 export function buildTransferTx({ mint, decimals, owner, to, feePayer, amount, memo, tokenProgram = TOKEN_PROGRAM_ID }) {
   const raw = BigInt(Math.round(amount * 10 ** decimals));
   const tx = new Transaction().add(
@@ -96,7 +96,7 @@ class SolanaChain {
     this.family = 'solana';
     this.network = cfg.cluster === 'mainnet-beta' ? 'Solana' : `Solana ${cfg.cluster}`;
     this.explorerName = 'Solscan';
-    this.buyUrl = cfg.buyUrl || (cfg.cluster === 'mainnet-beta' ? `https://pump.fun/coin/${cfg.mint}` : null);
+    this.buyUrl = cfg.buyUrl || null;
     this.tokenAddress = cfg.mint;
     this.tokenProgram = new PublicKey(cfg.tokenProgram || TOKEN_PROGRAM_ID.toBase58());
     this.decimals = cfg.decimals;

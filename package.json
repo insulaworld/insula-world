@@ -4,10 +4,8 @@
   "description": "Insula World: an autonomous agent economy on Solana.",
   "main": "index.js",
   "scripts": {
-    "test": "node test/transfer.test.js && node test/token2022.test.js",
+    "test": "node test/evm.test.mjs && node test/evm-resilience.test.mjs",
     "start": "node server/index.js",
-    "setup": "node server/setup.js",
-    "setup:mainnet": "node server/setup-mainnet.js",
     "setup:robinhood": "node server/setup-robinhood.js",
     "mock": "node server/index.js --mock",
     "fast": "node server/index.js --mock --fast",

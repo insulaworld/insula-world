@@ -216,6 +216,11 @@ export class Sound {
     this.#noiseHit('bandpass', 2200, 0.6 * vol, 0.45, 0.8);
   }
 
+  swish(vol = 1) {
+    if (!this.on || vol < 0.02) return;
+    this.#noiseHit('bandpass', 3400, 0.32 * vol, 0.28, 2.2);
+  }
+
   blip() {
     if (!this.on) return;
     this.#pluck(880 + Math.random() * 220, 0.03);

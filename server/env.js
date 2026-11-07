@@ -24,7 +24,7 @@ if (process.argv.includes('--fast')) {
   process.env.INSULA_FRESH ||= '1';
 }
 
-// On a host (Railway, a VPS), the wallets and chain settings can come from one secret variable,
+// On a host (Fly.io, a VPS), the wallets and chain settings can come from one secret variable,
 // INSULA_SECRETS, made by "npm run secrets". It's unpacked into .keys/ and chain-config.json at start.
 if (process.env.INSULA_SECRETS && !fs.existsSync(path.resolve('chain-config.json'))) {
   const packed = JSON.parse(Buffer.from(process.env.INSULA_SECRETS, 'base64').toString('utf8'));

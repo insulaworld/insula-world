@@ -55,8 +55,22 @@ class Agent {
     this.hunger = 2;
     this.memory = [];
     this.refusals = {};
+    this.grudges = {}; // otherId -> { n, last }: who they believe has wronged them
     this.say = null;
     this.engaged = false;
+  }
+
+  // How strongly this agent holds a grudge against someone: each known theft counts, fading by half every 12 hours.
+  grudge(id) {
+    const g = this.grudges?.[id];
+    if (!g) return 0;
+    return g.n * Math.pow(0.5, (Date.now() - g.last) / GRUDGE_HALF_LIFE_MS);
+  }
+
+  holdGrudge(id, weight = 1) {
+    const now = Date.now();
+    const cur = this.grudge(id);
+    this.grudges[id] = { n: Math.min(20, cur + weight), last: now };
   }
 
   remember(text) {
@@ -143,7 +157,7 @@ class Agent {
   }
 
   save() {
-    return { id: this.id, x: this.x, z: this.z, inv: this.inv, hunger: this.hunger, memory: this.memory, refusals: this.refusals };
+    return { id: this.id, x: this.x, z: this.z, inv: this.inv, hunger: this.hunger, memory: this.memory, refusals: this.refusals, grudges: this.grudges };
   }
 
   snapshot() {
@@ -162,6 +176,14 @@ class Agent {
     };
   }
 }
+
+// Smallest lot neighbors trade in (TRADE_MIN_LOT in .env). Fewer, bigger trades: same economy, less gas.
+const MIN_LOT = Math.max(1, Number(process.env.TRADE_MIN_LOT || 6));
+// Grudges: victims who know (or strongly suspect) who robbed them refuse deals, drive harder bargains and keep watch at night.
+const GRUDGE_HALF_LIFE_MS = Number(process.env.GRUDGE_HALF_LIFE_MS || 12 * 3600_000);
+const SUSPECT_ODDS = Number(process.env.GRUDGE_SUSPECT_ODDS || 0.5); // chance a victim works out who did it when the thief gets away
+// Smallest shipment to the mainland worth sending, in coins (MIN_SHIP_COINS in .env).
+const MIN_SHIP = Math.max(0, Number(process.env.MIN_SHIP_COINS || 40));
 
 export class Sim {
   constructor(world, chain, opts = {}) {
@@ -414,6 +436,8 @@ export class Sim {
       pendingJob: this.jobs.some((j) => j.client === agent.id && j.status !== 'done'),
       projects: Object.values(this.projects).filter((p) => p.status === 'funding').map((p) => ({ id: p.id, label: PROJECTS[p.id].label, funded: Math.round(p.funded), need: p.need, perk: PROJECTS[p.id].perk })),
       refusals: Object.fromEntries(Object.entries(agent.refusals).filter(([, v]) => Date.now() - v.ts < 150_000).map(([k, v]) => [k, v.price])),
+      grudges: Object.values(this.agents).filter((a) => a !== agent && agent.grudge(a.id) >= 0.5).map((a) => ({ id: a.id, name: a.name, level: Math.round(agent.grudge(a.id) * 10) / 10 })),
+      watchedBy: agent.role === 'thief' ? Object.values(this.agents).filter((a) => a !== agent && a.grudge(agent.id) >= 2).map((a) => a.name) : [],
     };
   }
 
@@ -458,6 +482,8 @@ export class Sim {
         const d = await brain.decide(agent, ctx, options);
         agent.thinking = false;
         this.decisions++;
+        // Neighbor trades come in lots of at least MIN_LOT; settle the size here so the record matches the deal.
+        if ((d.option.action === 'sell' || d.option.action === 'buy') && d.option.maxQty >= MIN_LOT) d.qty = Math.min(d.option.maxQty, Math.max(d.qty || 0, MIN_LOT));
         const rec = {
           id: `D${this.decisionSeq++}`, agent: agent.id, name: agent.name, at: Date.now(), day: this.genesisDay() + 1,
           brain: d.brain || 'rule', saw: { coins: Math.round(ctx.self.coins), inv: { ...ctx.self.inv }, hunger: ctx.self.hunger },
@@ -518,12 +544,15 @@ export class Sim {
     for (const other of Object.values(this.agents)) {
       if (other === agent) continue;
       for (const item of items) {
-        if (agent.inv[item] > 0 && !cooling(`sell:${item}:${other.id}`)) opts.push({ id: `sell:${item}:${other.id}`, action: 'sell', item, with: other.id, withName: other.name, maxQty: agent.inv[item], label: `sell ${item} to ${other.name} (you have ${agent.inv[item]})` });
-        if (other.inv[item] > 0 && coins >= PRICES[item].min && !cooling(`buy:${item}:${other.id}`)) opts.push({ id: `buy:${item}:${other.id}`, action: 'buy', item, with: other.id, withName: other.name, maxQty: other.inv[item], label: `buy ${item} from ${other.name} (they have ${other.inv[item]})` });
+        // Trades between neighbors come in lots of at least MIN_LOT: every trade is a real token transfer
+        // that costs gas, so a few bigger deals beat a stream of tiny ones.
+        if (agent.inv[item] >= MIN_LOT && !cooling(`sell:${item}:${other.id}`)) opts.push({ id: `sell:${item}:${other.id}`, action: 'sell', item, with: other.id, withName: other.name, maxQty: agent.inv[item], label: `sell ${item} to ${other.name} (you have ${agent.inv[item]}; lots of ${MIN_LOT} or more)` });
+        if (other.inv[item] >= MIN_LOT && coins >= PRICES[item].min * MIN_LOT && !cooling(`buy:${item}:${other.id}`)) opts.push({ id: `buy:${item}:${other.id}`, action: 'buy', item, with: other.id, withName: other.name, maxQty: other.inv[item], label: `buy ${item} from ${other.name} (they have ${other.inv[item]}; lots of ${MIN_LOT} or more)` });
       }
     }
     for (const item of items) {
-      if (agent.inv[item] > 0) opts.push({ id: `export:${item}`, action: 'export', item, maxQty: agent.inv[item], label: `ship ${item} to the mainland at ${this.mainlandPrice(item)} each (price drops as more is shipped)` });
+      // A shipment has to be worth at least MIN_SHIP coins: each one is a real transfer that costs gas.
+      if (agent.inv[item] > 0 && agent.inv[item] * this.mainlandPrice(item) >= MIN_SHIP) opts.push({ id: `export:${item}`, action: 'export', item, maxQty: agent.inv[item], label: `ship ${item} to the mainland at ${this.mainlandPrice(item)} each (price drops as more is shipped)` });
       const ip = this.importPrice(item);
       if (coins >= ip * 2) opts.push({ id: `import:${item}`, action: 'import', item, maxQty: Math.min(20, Math.floor((coins - 50) / ip)), label: `buy ${item} from the mainland at ${ip} each (always in stock, but pricey)` });
     }
@@ -800,6 +829,10 @@ export class Sim {
     if (n2 <= 0) return;
     const price = this.mainlandPrice(item);
     const amount = n2 * price;
+    if (amount < MIN_SHIP) {
+      agent.think(`The mainland only pays ${price} each now. ${amount} coins isn't worth the boat.`, 'NO SHIP');
+      return;
+    }
     agent.speak(`${n2} ${item} off to the mainland!`);
     try {
       const res = await this.#pay('bank', agent.id, amount, `mainland bought ${n2} ${item} from ${agent.name} for ${amount}`, { by: agent });
@@ -859,9 +892,22 @@ export class Sim {
     if (!(await this.#meet(agent, other))) return;
     const gap = this.talkGap();
     try {
-      const n = Math.min(qty, seller.inv[item]);
-      if (n <= 0) {
-        agent.think(`${seller.name} doesn't have any ${item} anymore. Missed it.`, 'NO DEAL');
+      const n = Math.min(Math.max(qty || 0, MIN_LOT), seller.inv[item]);
+      if (n < MIN_LOT) {
+        agent.think(`${seller.name} doesn't have ${MIN_LOT} ${item} anymore. Missed it.`, 'NO DEAL');
+        return;
+      }
+      // Someone who knows you've been robbing them may not deal with you at all.
+      const g = other.grudge(agent.id);
+      if (g >= 1 && Math.random() < Math.min(0.85, 0.25 + g * 0.12)) {
+        other.speak(brain.pick([`Not with you, ${agent.name}. I know what you did.`, 'Keep walking, thief.', `I don't trade with thieves.`, 'After last night? No.']));
+        other.think(`${agent.name} has been stealing from me. I'm not doing business with ${agent.name}.`, 'REFUSE');
+        agent.think(`${other.name} won't trade with me. Word gets around.`, 'SHUNNED');
+        agent.remember(`${other.name} refused to trade with me (grudge)`);
+        agent.refusals[`${side}:${item}:${other.id}`] = { price: 0, ts: Date.now() };
+        this.log(`${other.name} refused to trade with ${agent.name}.`);
+        this.emit({ type: 'story', kind: 'refuse', from: other.id, to: agent.id, item });
+        this.mood(other, 'angry');
         return;
       }
       agent.task = other.task = 'haggling';
@@ -1327,20 +1373,29 @@ export class Sim {
     victim.inv[item] -= n;
     thief.inv[item] += n;
     this.stats.thefts++;
-    const odds = 0.25 + (this.projectDone('lighthouse') ? 0.25 : 0);
+    // Victims holding a grudge keep watch at night, so they're harder to rob.
+    const watching = Math.min(0.3, victim.grudge(thief.id) * 0.06);
+    const odds = 0.25 + (this.projectDone('lighthouse') ? 0.25 : 0) + watching;
     if (Math.random() > odds) {
       thief.think(`Got ${n} ${item} off ${victim.name}. Nobody saw a thing.`, 'GOT AWAY');
-      victim.remember(`${n} ${item} went missing in the night`);
       this.log(`${n} ${item} went missing from ${victim.name} in the night.`);
       this.emit({ type: 'story', kind: 'theft', thief: thief.id, victim: victim.id, item, n, caught: false });
+      if (Math.random() < SUSPECT_ODDS) {
+        victim.holdGrudge(thief.id, 1);
+        victim.remember(`${n} ${item} went missing in the night; pretty sure it was ${thief.name}`);
+        victim.think(`${n} ${item} gone, and I saw ${thief.name} slinking off. I won't forget it.`, 'SUSPECT');
+      } else {
+        victim.remember(`${n} ${item} went missing in the night`);
+      }
       return;
     }
+    victim.holdGrudge(thief.id, 2);
     // Caught
     this.stats.caught++;
     this.emit({ type: 'story', kind: 'theft', thief: thief.id, victim: victim.id, item, n, caught: true });
     thief.inv[item] -= n;
     victim.inv[item] += n;
-    victim.speak(`Hey! THIEF! Give back my ${item}!`, 3600);
+    victim.speak(watching > 0 ? `I KNEW it was you, ${thief.name}! Give it back!` : `Hey! THIEF! Give back my ${item}!`, 3600);
     thief.speak(brain.pick(['Just... borrowing it.', 'This? I found this.', 'Wrong raccoon!']));
     this.mood(victim, 'angry');
     const mayor = this.byRole('mayor')[0];

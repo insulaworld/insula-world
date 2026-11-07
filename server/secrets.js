@@ -7,7 +7,7 @@ import path from 'node:path';
 const keysDir = path.resolve('.keys');
 const configPath = path.resolve('chain-config.json');
 if (!fs.existsSync(configPath) || !fs.existsSync(keysDir)) {
-  console.log('No wallets yet. Run "npm run setup" first.');
+  console.log('No wallets yet. Run "npm run setup:robinhood" first.');
   process.exit(1);
 }
 const keys = {};
