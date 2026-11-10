@@ -176,7 +176,7 @@ function applyTime(t) {
   renderer.toneMappingExposure = lerp(a.exp, b.exp, k);
   grade.uniforms.warmth.value = lerp(a.warm, b.warm, k);
   grade.uniforms.vignette.value = 0.3 + nightness * 0.2;
-  bloom.strength = 0.4 + nightness * 0.55;
+  bloom.strength = 0.4 + nightness * 0.2;
   const el = THREE.MathUtils.degToRad(lerp(a.el, b.el, k));
   const az = 0.9 + t * Math.PI * 1.4;
   const dir = new THREE.Vector3(Math.cos(az) * Math.cos(el), Math.sin(el), Math.sin(az) * Math.cos(el));
@@ -1826,7 +1826,7 @@ function syncBuildings(list) {
 function stepBuildings(t) {
   const nightGlow = clamp01((nightness - 0.15) * 1.5);
   for (const rec of builtMeshes.values()) {
-    rec.glow.material.emissiveIntensity = 0.4 + nightGlow * 3;
+    rec.glow.material.emissiveIntensity = 0.4 + nightGlow * 1.3;
     if (rec.done && rec.b.type === 'workshop' && Math.random() < 0.15) {
       burst(new THREE.Vector3(rec.b.x + 1, rec.b.y + rec.top + 2.2, rec.b.z - 1), 0xb8bcc2, 1, 0.5, 1.5, 2.2, 2.6);
     }
@@ -2070,7 +2070,7 @@ function frame() {
     if (g.userData.beam) {
       const on = clamp01((nightness - 0.2) * 1.6);
       g.userData.beam.intensity = on * 14;
-      g.userData.lamp.material.emissiveIntensity = 0.3 + on * 3;
+      g.userData.lamp.material.emissiveIntensity = 0.3 + on * 1.6;
     }
     const blink = (t + rec.pos.x) % 4 < 0.12;
     eyes.forEach((e) => (e.scale.y = blink ? 0.15 : 1));
@@ -2132,7 +2132,7 @@ function frame() {
   for (const p of lanterns) {
     const on = clamp01((nightness - 0.15) * 1.5);
     p.userData.light.intensity = on * 7;
-    p.userData.lamp.material.emissiveIntensity = 0.4 + on * 3.2 + Math.sin(t * 9 + p.x) * 0.08 * on;
+    p.userData.lamp.material.emissiveIntensity = 0.4 + on * 1.6 + Math.sin(t * 9 + p.x) * 0.06 * on;
   }
   if (fireflies.points) {
     const arr = fireflies.points.geometry.attributes.position.array;

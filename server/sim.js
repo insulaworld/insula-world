@@ -15,6 +15,13 @@ import * as brain from './brain.js';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const SPEED = 2.4; // tiles per second
+// Animals are about a tile wide, nose to tail. Two that meet to deal stop this far apart (centre to
+// centre) so their faces don't overlap, and anyone closer than PERSONAL_SPACE gets nudged apart.
+const MEET_GAP = 2.4;
+const PERSONAL_SPACE = 1.5;
+// Buildings are solid: an animal's centre stays this far outside a building's walls.
+const WALL_PAD = 0.4;
+const BIG_PROJECTS = new Set(['townhall', 'markethall']);
 const SKY_MS = 10 * 60 * 1000; // one sky cycle (sunrise to night); must match web/app.js
 const cap = (s) => s[0].toUpperCase() + s.slice(1);
 const DEF = Object.fromEntries(AGENT_DEFS.map((d) => [d.id, d]));
@@ -99,12 +106,16 @@ class Agent {
   walkTo(x, z) {
     this.follow = null;
     this.target = { x, z };
+    this.progressAt = 0;
+    this.walkSince = Date.now();
     return new Promise((r) => (this.arrive = r));
   }
 
   walkToAgent(other) {
     this.target = null;
     this.follow = other;
+    this.progressAt = 0;
+    this.walkSince = Date.now();
     return new Promise((r) => (this.arrive = r));
   }
 
@@ -118,8 +129,10 @@ class Agent {
     const goal = this.follow ? { x: this.follow.x, z: this.follow.z } : this.target;
     if (!goal) return;
     const d = dist(this, goal);
-    const reach = this.follow ? 1.6 : 0.15;
-    if (d <= reach) {
+    const reach = this.follow ? MEET_GAP : 0.15;
+    // A little slack so an animal that has stopped at the right distance counts as arrived (otherwise
+    // rounding leaves it creeping toward the exact gap forever).
+    if (d <= reach + 0.05) {
       this.target = null;
       this.follow = null;
       const r = this.arrive;
@@ -128,11 +141,25 @@ class Agent {
       return;
     }
     const speed = this.follow ? SPEED * 1.4 : SPEED;
-    const move = Math.min(d - reach * 0.5, speed * dt);
-    const dx = (goal.x - this.x) / d, dz = (goal.z - this.z) / d;
-    this.x += dx * move;
-    this.z += dz * move;
-    this.heading = Math.atan2(dx, dz);
+    const now = Date.now();
+    const ghost = this.ghostUntil && now < this.ghostUntil;
+    // Walk around buildings: head for the next corner when a house is in the way, then straight on.
+    const wp = ghost ? goal : this.sim.waypoint(this, goal);
+    const direct = wp === goal;
+    const dw = direct ? d : dist(this, wp);
+    let move = Math.min(speed * dt, direct ? d - reach * (this.follow ? 1 : 0.5) : dw);
+    if (dw > 1e-6 && move > 0) {
+      const dx = (wp.x - this.x) / dw, dz = (wp.z - this.z) / dw;
+      this.x += dx * move;
+      this.z += dz * move;
+      this.heading = Math.atan2(dx, dz);
+    }
+    if (!ghost) this.sim.unclip(this);
+    // Safety net: an animal that hasn't actually moved for 3 seconds, or has been walking to the same
+    // place for 40 seconds, is allowed straight through for a moment so it can never get stuck.
+    if (!this.progressAt || dist(this, this.progressPos) > 0.3) { this.progressAt = now; this.progressPos = { x: this.x, z: this.z }; }
+    else if (now - this.progressAt > 3000) { this.ghostUntil = now + 3000; this.progressAt = now; }
+    if (this.walkSince && now - this.walkSince > 40_000) { this.ghostUntil = now + 3000; this.walkSince = now; }
   }
 
   face(other) {
@@ -441,6 +468,123 @@ export class Sim {
     };
   }
 
+  // Footprints of everything standing (or going up), padded so animals stay outside the walls.
+  // Recomputed every couple of seconds; the harbor is a walkable pier, so it doesn't count.
+  solids() {
+    if (this._solidsAt && Date.now() - this._solidsAt < 2000) return this._solids;
+    this._solidsAt = Date.now();
+    this._solids = this.buildings.filter((b) => b.type !== 'harbor' && b.x != null).map((b) => {
+      const half = (b.kind === 'project' && BIG_PROJECTS.has(b.type) ? 2.5 : 1.5) + WALL_PAD;
+      return { x: b.x, z: b.z, half };
+    });
+    return this._solids;
+  }
+
+  // Where to head next on the way to `goal`: straight there when no building is in the way, otherwise the
+  // corner (just outside the walls) of the first building on the line that makes the shortest detour.
+  waypoint(a, goal) {
+    const solids = this.solids();
+    const inBox = (p, b, pad = 0) => Math.abs(p.x - b.x) < b.half + pad && Math.abs(p.z - b.z) < b.half + pad;
+    // First building the straight line from p to q passes through (2D slab test).
+    const firstHit = (p, q) => {
+      let best = null, bestT = Infinity;
+      const dx = q.x - p.x, dz = q.z - p.z;
+      for (const b of solids) {
+        if (inBox(p, b) || inBox(q, b)) continue;
+        let t0 = 0, t1 = 1, ok = true;
+        for (const [o, dd, lo, hi] of [[p.x, dx, b.x - b.half, b.x + b.half], [p.z, dz, b.z - b.half, b.z + b.half]]) {
+          if (Math.abs(dd) < 1e-9) { if (o <= lo || o >= hi) { ok = false; break; } continue; }
+          let ta = (lo - o) / dd, tb = (hi - o) / dd;
+          if (ta > tb) [ta, tb] = [tb, ta];
+          t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+          if (t0 >= t1) { ok = false; break; }
+        }
+        if (ok && t0 < bestT) { bestT = t0; best = b; }
+      }
+      return best;
+    };
+    const b = firstHit(a, goal);
+    if (!b) return goal;
+    const h = b.half + 0.35;
+    const len = (p, q) => Math.hypot(q.x - p.x, q.z - p.z);
+    const corners = [[1, 1], [1, -1], [-1, -1], [-1, 1]].map(([sx, sz]) => ({ x: b.x + sx * h, z: b.z + sz * h }));
+    const free = corners.map((c) => !solids.some((o) => inBox(c, o)));
+    // Rest of the trip from corner i: straight to the goal if this building no longer blocks it,
+    // otherwise around to the neighbouring corner that can see the goal.
+    const tail = (i) => {
+      const c = corners[i];
+      if (firstHit(c, goal) !== b) return len(c, goal);
+      let t = Infinity;
+      for (const j of [(i + 1) % 4, (i + 3) % 4]) if (free[j] && firstHit(corners[j], goal) !== b) t = Math.min(t, len(c, corners[j]) + len(corners[j], goal));
+      return t === Infinity ? len(c, goal) + 4 * h : t;
+    };
+    let best = null, cost = Infinity;
+    corners.forEach((c, i) => {
+      if (!free[i] || len(a, c) < 0.05 || firstHit(a, c)) return;
+      const k = len(a, c) + tail(i);
+      if (k < cost) { cost = k; best = c; }
+    });
+    return best || goal;
+  }
+
+  #insideSolid(x, z) {
+    return this.solids().some((b) => Math.abs(x - b.x) < b.half && Math.abs(z - b.z) < b.half);
+  }
+
+  // Push an animal out of any building it's standing in, along the shortest way out.
+  unclip(agent) {
+    for (const b of this.solids()) {
+      const dx = agent.x - b.x, dz = agent.z - b.z;
+      const px = b.half - Math.abs(dx), pz = b.half - Math.abs(dz);
+      if (px <= 0 || pz <= 0) continue;
+      // Shortest way out first, but never into the sea.
+      const sx = dx >= 0 ? 1 : -1, sz = dz >= 0 ? 1 : -1;
+      const exits = [
+        { x: agent.x + sx * px, z: agent.z, cost: px }, { x: agent.x, z: agent.z + sz * pz, cost: pz },
+        { x: b.x - sx * b.half, z: agent.z, cost: 2 * b.half - px }, { x: agent.x, z: b.z - sz * b.half, cost: 2 * b.half - pz },
+      ].sort((a, c) => a.cost - c.cost);
+      const out = exits.find((e) => this.#dry(e.x, e.z)) || exits[0];
+      agent.x = out.x; agent.z = out.z;
+    }
+  }
+
+  #dry(x, z) {
+    const w = this.world, xi = Math.round(x), zi = Math.round(z);
+    if (xi < 0 || zi < 0 || xi >= w.size || zi >= w.size) return false;
+    return w.heights[xi][zi] > w.waterLevel || Boolean(w.places?.dock?.pier?.tiles.some(([a, b]) => a === xi && b === zi));
+  }
+
+  // Land or pier, not open water, and not inside a building.
+  #standable(x, z) {
+    const w = this.world, xi = Math.round(x), zi = Math.round(z);
+    if (xi < 0 || zi < 0 || xi >= w.size || zi >= w.size) return false;
+    if (this.#insideSolid(x, z)) return false;
+    if (w.heights[xi][zi] > w.waterLevel) return true;
+    return Boolean(w.places?.dock?.pier?.tiles.some(([a, b]) => a === xi && b === zi));
+  }
+
+  // Personal space: animals closer than PERSONAL_SPACE drift apart, so a crowd at the dock or the market
+  // stands side by side instead of inside each other. Two animals in a deal never get moved.
+  #separate(dt) {
+    const list = Object.values(this.agents);
+    const k = Math.min(1, dt * 6);
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const a = list[i], b = list[j];
+        if (a.engaged && b.engaged) continue;
+        let dx = a.x - b.x, dz = a.z - b.z, d = Math.hypot(dx, dz);
+        if (d >= PERSONAL_SPACE) continue;
+        if (d < 0.01) { dx = Math.cos(i + j); dz = Math.sin(i + j); d = 1; }
+        const push = (PERSONAL_SPACE - d) * k, ux = dx / d, uz = dz / d;
+        const share = a.engaged ? [0, 1] : b.engaged ? [1, 0] : [0.5, 0.5];
+        const ax = a.x + ux * push * share[0], az = a.z + uz * push * share[0];
+        const bx = b.x - ux * push * share[1], bz = b.z - uz * push * share[1];
+        if (share[0] && this.#dry(ax, az)) { a.x = ax; a.z = az; }
+        if (share[1] && this.#dry(bx, bz)) { b.x = bx; b.z = bz; }
+      }
+    }
+  }
+
   // ---------- Main loops ----------
 
   start() {
@@ -450,6 +594,10 @@ export class Sim {
       const dt = Math.min(0.2, (now - last) / 1000);
       last = now;
       for (const a of Object.values(this.agents)) a.step(dt);
+      this.#separate(dt);
+      for (const a of Object.values(this.agents)) {
+        if (a.engaged || (!a.target && !a.follow)) this.unclip(a);
+      }
     }, 50);
     setInterval(() => {
       for (const a of Object.values(this.agents)) {
@@ -880,6 +1028,16 @@ export class Sim {
     }
     agent.engaged = other.engaged = true;
     agent.dealRec = other.dealRec = agent.decision || null;
+    // Nobody haggles from inside a wall.
+    agent.ghostUntil = other.ghostUntil = 0;
+    this.unclip(agent); this.unclip(other);
+    // If the other one walked into us on the way, step back so the two stand a proper distance apart.
+    const d = dist(agent, other);
+    if (d < MEET_GAP - 0.2) {
+      const ux = d > 0.01 ? (agent.x - other.x) / d : 1, uz = d > 0.01 ? (agent.z - other.z) / d : 0;
+      const nx = other.x + ux * MEET_GAP, nz = other.z + uz * MEET_GAP;
+      if (this.#standable(nx, nz)) { agent.x = nx; agent.z = nz; }
+    }
     agent.face(other);
     other.face(agent);
     return true;
