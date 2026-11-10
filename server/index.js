@@ -135,6 +135,8 @@ app.get('/api/decisions', (req, res) => {
     .map(({ canonical, ...r }) => (agent ? r : { canonical, ...r })));
 });
 app.get('/decisions', (_req, res) => res.redirect('/api/decisions?limit=500'));
+// The Verify page: check any payment on Robinhood Chain against the decision that caused it.
+app.get(['/verify', '/verify/:q'], (_req, res) => res.sendFile(path.resolve('web/verify.html')));
 
 // The Insula Daily: one edition per genesis day, plus today's paper so far.
 app.get('/api/daily', (_req, res) => res.json({ editions: sim.daily.index(), latest: sim.daily.latest() }));
@@ -287,6 +289,58 @@ function economyReport() {
   return data;
 }
 app.get('/api/economy', (_req, res) => res.json(economyReport()));
+// Leaderboards: who's richest, most trusted, busiest, biggest mover, plus the thief's rap sheet and the
+// island's strongest partnerships. Agent-level trust uses the same formula as pairwise trust, but a theft
+// counts only against the thief and a default only against the borrower.
+let lbCache = null;
+function leaderboard() {
+  if (lbCache && Date.now() - lbCache.at < 60_000) return lbCache.data;
+  try { readNewSamples(); } catch (e) { console.error('[leaderboard]', e.message); }
+  const st = sim.state();
+  const pairs = relations.summary().pairs;
+  const role = (id) => sim.agents[id]?.role;
+  const now = Date.now();
+  const past = econLog.rows.find((r) => r.coins && r.t >= now - 24 * 3600_000);
+  const stats = {};
+  for (const a of st.agents) {
+    stats[a.id] = {
+      id: a.id, name: a.name, species: a.species, job: a.job, role: a.role || null, color: a.color,
+      coins: Math.round(a.balance ?? 0), coins24h: past?.coins?.[a.id] != null ? Math.round(past.coins[a.id]) : null,
+      trades: 0, volume: 0, contracts: 0, partners: 0, loansRepaid: 0, defaults: 0, thefts: 0, caught: 0, robbed: 0, walkaways: 0, good: 0, bad: 0,
+    };
+  }
+  const topPairs = [];
+  for (const [k, p] of Object.entries(pairs)) {
+    const [a, b] = k.split('|');
+    if (!stats[a] || !stats[b]) continue;
+    for (const [x, y] of [[a, b], [b, a]]) {
+      const s = stats[x];
+      s.trades += p.trades; s.contracts += p.contracts; s.volume += (p.volume || 0) + (p.contractVolume || 0);
+      s.walkaways += p.noDeals;
+      if (p.trades + p.contracts > 0) s.partners++;
+      s.good += p.trades + p.contracts * 2 + p.repaid * 3;
+      s.bad += p.noDeals * 0.5;
+      const borrower = role(x) !== 'banker' || role(y) === 'banker';
+      if (borrower) { s.loansRepaid += p.repaid; s.defaults += p.defaults; s.bad += p.defaults * 6; }
+      if (role(x) === 'thief') { s.thefts += p.thefts; s.caught += p.caught; s.bad += p.thefts * 4; }
+      else s.robbed += p.thefts;
+    }
+    if (p.trades + p.contracts > 0) topPairs.push({ a, b, trades: p.trades, contracts: p.contracts, volume: (p.volume || 0) + (p.contractVolume || 0), trust: p.trust, rivalry: p.rivalry });
+  }
+  const agents = Object.values(stats).map((s) => ({
+    ...s,
+    trust: Math.round((100 * (s.good + 1)) / (s.good + s.bad + 2)),
+    change24h: s.coins24h != null ? s.coins - s.coins24h : null,
+    change24hPct: s.coins24h ? Math.round(((s.coins - s.coins24h) / s.coins24h) * 1000) / 10 : null,
+  }));
+  topPairs.sort((p, q) => q.trades + q.contracts - (p.trades + p.contracts));
+  const data = { at: now, day: st.day, since: relations.data.since, agents, pairs: topPairs.slice(0, 8) };
+  lbCache = { at: now, data };
+  return data;
+}
+app.get('/api/leaderboard', (_req, res) => res.json(leaderboard()));
+app.get('/leaderboard', (_req, res) => res.sendFile(path.resolve('web/leaderboard.html')));
+
 sim.on((e) => { if (e.type === 'chainError') chainErrors++; });
 function gini(xs) {
   const v = xs.slice().sort((a, b) => a - b);

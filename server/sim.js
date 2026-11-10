@@ -180,7 +180,7 @@ class Agent {
 // Smallest lot neighbors trade in (TRADE_MIN_LOT in .env). Fewer, bigger trades: same economy, less gas.
 const MIN_LOT = Math.max(1, Number(process.env.TRADE_MIN_LOT || 6));
 // Grudges: victims who know (or strongly suspect) who robbed them refuse deals, drive harder bargains and keep watch at night.
-const GRUDGE_HALF_LIFE_MS = Number(process.env.GRUDGE_HALF_LIFE_MS || 12 * 3600_000);
+const GRUDGE_HALF_LIFE_MS = Number(process.env.GRUDGE_HALF_LIFE_MS || 8 * 3600_000);
 const SUSPECT_ODDS = Number(process.env.GRUDGE_SUSPECT_ODDS || 0.5); // chance a victim works out who did it when the thief gets away
 // Smallest shipment to the mainland worth sending, in coins (MIN_SHIP_COINS in .env).
 const MIN_SHIP = Math.max(0, Number(process.env.MIN_SHIP_COINS || 40));
@@ -899,7 +899,7 @@ export class Sim {
       }
       // Someone who knows you've been robbing them may not deal with you at all.
       const g = other.grudge(agent.id);
-      if (g >= 1 && Math.random() < Math.min(0.85, 0.25 + g * 0.12)) {
+      if (g >= 1 && Math.random() < Math.min(0.6, 0.15 + g * 0.08)) {
         other.speak(brain.pick([`Not with you, ${agent.name}. I know what you did.`, 'Keep walking, thief.', `I don't trade with thieves.`, 'After last night? No.']));
         other.think(`${agent.name} has been stealing from me. I'm not doing business with ${agent.name}.`, 'REFUSE');
         agent.think(`${other.name} won't trade with me. Word gets around.`, 'SHUNNED');

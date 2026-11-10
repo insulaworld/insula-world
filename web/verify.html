@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Verify · Insula World</title>
+  <meta name="description" content="Check any Insula payment on Robinhood Chain against the AI decision that caused it." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;500;700&family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #070b16; --bg2: #0d1428; --card: rgba(255,255,255,0.04); --line: rgba(255,255,255,0.10);
+      --text: #f1f4f2; --muted: #9aa6bd; --mint: #8ff0c1; --gold: #f5c66b; --rose: #ff8a7a;
+      --display: 'Unbounded', 'Arial Black', system-ui, sans-serif;
+      --body: 'Instrument Sans', 'Helvetica Neue', Arial, sans-serif;
+      --mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    html { background-color: var(--bg); }
+    body { margin: 0; min-height: 100vh; color: var(--text); font-family: var(--body); font-size: 16px; line-height: 1.5; background-color: var(--bg);
+      background-image: radial-gradient(circle at 12% 0%, rgba(143,240,193,0.09), transparent 40%), radial-gradient(circle at 90% 100%, rgba(245,198,107,0.08), transparent 45%), linear-gradient(180deg, var(--bg), var(--bg2)); background-attachment: fixed; }
+    a { color: var(--mint); }
+    .wrap { max-width: 860px; margin: 0 auto; padding: 32px 16px 64px; }
+    .top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .mark { font-family: var(--display); font-weight: 500; letter-spacing: 0.3em; font-size: 13px; color: var(--text); text-decoration: none; opacity: 0.85; }
+    .back { font-family: var(--mono); font-size: 13px; color: var(--muted); text-decoration: none; }
+    .back:hover { color: var(--text); }
+    h1 { font-family: var(--display); font-weight: 500; font-size: clamp(28px, 5vw, 44px); line-height: 1.1; margin: 36px 0 12px; letter-spacing: -0.01em; }
+    .lead { color: #c9d4f5; font-size: 18px; margin: 0 0 28px; max-width: 640px; }
+    form { display: flex; gap: 10px; flex-wrap: wrap; }
+    input { flex: 1 1 360px; min-width: 0; background: rgba(0,0,0,0.35); border: 1px solid var(--line); border-radius: 12px; color: var(--text);
+      font-family: var(--mono); font-size: 15px; padding: 14px 16px; outline: none; }
+    input:focus { border-color: rgba(143,240,193,0.6); }
+    button { background: var(--mint); color: #06110c; border: 0; border-radius: 12px; font-family: var(--display); font-weight: 500; font-size: 14px; letter-spacing: 0.06em; padding: 0 22px; min-height: 48px; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    .hint { color: var(--muted); font-size: 14px; margin: 10px 0 0; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 20px 22px; margin-top: 22px; }
+    .verdict { display: flex; gap: 14px; align-items: center; font-family: var(--display); font-weight: 500; font-size: 20px; }
+    .verdict .icon { flex: none; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-size: 20px; }
+    .verdict.ok { border-color: rgba(143,240,193,0.45); background: rgba(143,240,193,0.06); }
+    .verdict.ok .icon { background: var(--mint); color: #06110c; }
+    .verdict.bad { border-color: rgba(255,138,122,0.5); background: rgba(255,138,122,0.06); }
+    .verdict.bad .icon { background: var(--rose); color: #1a0705; }
+    .verdict.rule .icon { background: var(--gold); color: #1a1405; }
+    .verdict small { display: block; font-family: var(--body); font-weight: 400; font-size: 15px; color: var(--muted); margin-top: 2px; }
+    .label { font-family: var(--mono); font-size: 12px; letter-spacing: 0.18em; color: var(--muted); text-transform: uppercase; margin: 0 0 12px; }
+    ol.checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+    ol.checks li { display: grid; grid-template-columns: 22px 1fr; gap: 10px; }
+    ol.checks .st { font-family: var(--mono); color: var(--muted); }
+    ol.checks li.ok .st { color: var(--mint); }
+    ol.checks li.bad .st { color: var(--rose); }
+    ol.checks li.skip .st { color: var(--muted); }
+    ol.checks b { font-weight: 600; }
+    .detail { display: block; color: var(--muted); font-size: 14px; word-break: break-all; }
+    .mono { font-family: var(--mono); }
+    .memo { font-family: var(--mono); font-size: 14px; background: rgba(0,0,0,0.35); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-top: 6px; word-break: break-word; color: var(--text); }
+    .thought { font-size: 19px; line-height: 1.45; margin: 4px 0 14px; }
+    .meta { font-family: var(--mono); font-size: 12px; letter-spacing: 0.12em; color: var(--muted); }
+    h3 { font-family: var(--display); font-weight: 500; font-size: 18px; margin: 4px 0 12px; }
+    h4 { font-size: 13px; font-family: var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); font-weight: 500; margin: 18px 0 6px; }
+    ul.plain, ol.steps { margin: 0; padding-left: 20px; }
+    ol.steps li, ul.plain li { margin: 4px 0; }
+    .steps .said { color: var(--text); }
+    .steps .th { color: var(--muted); }
+    .recent { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+    .recent a { display: grid; grid-template-columns: 70px 1fr auto; gap: 12px; padding: 10px 8px; border-radius: 10px; color: var(--text); text-decoration: none; align-items: baseline; }
+    .recent a:hover { background: rgba(255,255,255,0.05); }
+    .recent .id { font-family: var(--mono); color: var(--muted); font-size: 13px; }
+    .recent .go { font-family: var(--mono); font-size: 13px; color: var(--mint); }
+    .fine { color: var(--muted); font-size: 14px; }
+    .fine p { margin: 0 0 8px; }
+    .hidden { display: none; }
+    @media (max-width: 560px) {
+      .recent a { grid-template-columns: 56px 1fr; }
+      .recent .go { display: none; }
+      .verdict { font-size: 17px; }
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <a class="mark" href="/">INSULA WORLD · VERIFY</a>
+    <a class="back" href="/">← Back to the island</a>
+  </div>
+
+  <h1>Check any payment against its reason.</h1>
+  <p class="lead">Every payment an Insula agent makes on Robinhood Chain carries a fingerprint of the decision that caused it. Paste a transaction hash and this page reads it straight from the chain, then checks it against the decision record. The hashing runs in your browser.</p>
+
+  <form id="f">
+    <input id="q" autocomplete="off" spellcheck="false" placeholder="Transaction hash (0x…) or decision ID (D1234)" />
+    <button id="go" type="submit">VERIFY</button>
+  </form>
+  <p class="hint">Find a hash on any agent's Blockscout page, in the Ledger, or pick a recent payment below.</p>
+
+  <div id="out"></div>
+
+  <div class="card" id="recent-card">
+    <p class="label">Recent payments</p>
+    <ul class="recent" id="recent"><li class="fine">Loading…</li></ul>
+  </div>
+
+  <div class="card fine">
+    <p class="label">What this proves</p>
+    <p>A match proves the decision record (what the agent had, the moves it could make, what it chose, its reasoning and the negotiation) is exactly what was fingerprinted into the payment when the money moved, and hasn't been changed since.</p>
+    <p>It can't prove on its own that an AI wrote the record: the operator runs the server and holds the agents' keys. Payments that no agent decided, like taxes, fines and basic income, are labeled with the rule that made them.</p>
+  </div>
+</div>
+
+<script>
+const RPCS = { 'Robinhood': 'https://rpc.mainnet.chain.robinhood.com', 'Robinhood Testnet': 'https://rpc.testnet.chain.robinhood.com' };
+const EXPLORERS = { 'Robinhood': 'https://robinhoodchain.blockscout.com', 'Robinhood Testnet': 'https://explorer.testnet.chain.robinhood.com' };
+const RULES = {
+  welcome: 'a welcome grant when a new inhabitant arrives',
+  collection: 'the bank collecting an overdue loan',
+  tax: 'property tax collected by the mayor',
+  fine: 'a fine for being caught stealing',
+  'basic-income': 'basic income for an inhabitant who went broke',
+};
+const $ = (s) => document.querySelector(s);
+const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const fmt = (n) => Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 });
+let chain = null, names = {}, decimals = null;
+
+async function sha256Hex(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+async function rpc(method, params) {
+  const url = RPCS[chain?.network];
+  if (!url) throw new Error('This server is not running on Robinhood Chain (test mode).');
+  const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message || 'RPC error');
+  return j.result;
+}
+async function tokenDecimals() {
+  if (decimals != null) return decimals;
+  try { decimals = parseInt(await rpc('eth_call', [{ to: chain.token, data: '0x313ce567' }, 'latest']), 16); }
+  catch { decimals = 18; }
+  return decimals;
+}
+function hexToAscii(hex) {
+  let s = '';
+  for (let i = 0; i + 1 < hex.length; i += 2) s += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16));
+  return s;
+}
+function decodeTransfer(input) {
+  const h = (input || '').replace(/^0x/, '').toLowerCase();
+  if (!h.startsWith('a9059cbb') || h.length < 136) return null;
+  return { to: '0x' + h.slice(32, 72), raw: BigInt('0x' + h.slice(72, 136)), memo: hexToAscii(h.slice(136)) };
+}
+function parseMemo(memo) {
+  const m = /^Insula #(D\d+) why:([0-9a-f]{16}) \| (.*)$/.exec(memo || '');
+  if (m) return { id: m[1], prefix: m[2], text: m[3] };
+  const r = /^Insula rule:([\w-]+) \| (.*)$/.exec(memo || '');
+  if (r) return { rule: r[1], text: r[2] };
+  return null;
+}
+function units(raw, dec) {
+  const base = 10n ** BigInt(dec);
+  return Number(raw / base) + Number(raw % base) / Number(base);
+}
+const who = (id) => names[id]?.name || id;
+function choiceText(rec) {
+  const [verb, item, other] = String(rec.choice || '').split(':');
+  const q = rec.qty ? `${rec.qty} ` : '';
+  const at = rec.price ? ` at ${rec.price} each` : '';
+  if (verb === 'sell' && other) return `sell ${q}${item} to ${who(other)}${at}`;
+  if (verb === 'buy' && other) return `buy ${q}${item} from ${who(other)}${at}`;
+  if (verb === 'export') return `ship ${q}${item} to the mainland`;
+  if (verb === 'import') return `buy ${q}${item} from the mainland`;
+  return [rec.choice, rec.qty ? `qty ${rec.qty}` : '', rec.price ? `price ${rec.price}` : ''].filter(Boolean).join(' · ');
+}
+const whoAddr = (addr) => Object.values(names).find((a) => a.address && a.address.toLowerCase() === addr.toLowerCase())?.name;
+const txLink = (hash) => EXPLORERS[chain?.network] ? `<a href="${EXPLORERS[chain.network]}/tx/${hash}" target="_blank" rel="noopener">Blockscout ↗</a>` : '';
+
+function render({ verdict, checks, rec, memo, rule }) {
+  const icon = verdict.kind === 'ok' ? '✓' : verdict.kind === 'rule' ? '§' : '✗';
+  let html = `<div class="card verdict ${verdict.kind}"><span class="icon">${icon}</span><div>${esc(verdict.title)}<small>${esc(verdict.sub)}</small></div></div>`;
+  html += `<div class="card"><p class="label">Checks</p><ol class="checks">${checks.map((c) =>
+    `<li class="${c.state}"><span class="st">${c.state === 'ok' ? '✓' : c.state === 'bad' ? '✗' : '–'}</span><div><b>${esc(c.title)}</b>${c.detail ? `<span class="detail">${c.detail}</span>` : ''}</div></li>`).join('')}</ol>
+    ${memo ? `<h4>Memo in the transaction</h4><div class="memo">${esc(memo)}</div>` : ''}</div>`;
+  if (rule) html += `<div class="card"><p class="label">Rule payment</p><p>This payment wasn't an agent's decision. It was ${esc(RULES[rule] || `made by the rule “${rule}”`)}.</p></div>`;
+  if (rec) {
+    const inv = Object.entries(rec.saw?.inv || {}).filter(([, v]) => v).map(([k, v]) => `${v} ${k}`).join(', ') || 'nothing';
+    const steps = (rec.steps || []).map((st) => st.said
+      ? `<li class="said"><b>${esc(who(st.who))}</b> said “${esc(st.said)}”</li>`
+      : `<li class="th"><b>${esc(who(st.who))}</b> thought: ${esc(st.thought)}</li>`).join('');
+    const txs = (rec.txs || []).map((t) => `<li>${esc(t.text)} · ${fmt(t.amount)} $INSULA · ${t.sig ? `<a href="/verify/${t.sig}">verify</a>` : 'test'} ${t.sig ? txLink(t.sig) : ''}</li>`).join('');
+    html += `<div class="card">
+      <p class="meta">DECISION ${esc(rec.id)} · DAY ${esc(rec.day)} · ${new Date(rec.at).toLocaleString()} · ${rec.brain === 'rule' ? 'RULE BRAIN' : `AI · ${esc(rec.brain)}`}</p>
+      <h3>${esc(rec.name)} decided to ${esc(choiceText(rec))}</h3>
+      <p class="thought">“${esc(rec.thought)}”</p>
+      <h4>What ${esc(rec.name)} had</h4>
+      <p>${fmt(rec.saw?.coins ?? 0)} coins, ${esc(inv)}, hunger ${esc(rec.saw?.hunger)}/10. ${esc(rec.options)} possible moves.</p>
+      ${steps ? `<h4>The negotiation</h4><ol class="steps">${steps}</ol>` : ''}
+      ${txs ? `<h4>Payments from this decision</h4><ul class="plain">${txs}</ul>` : ''}
+      <h4>Full fingerprint (SHA-256)</h4><p class="mono detail">${esc(rec.hash)}</p>
+    </div>`;
+  }
+  $('#out').innerHTML = html;
+}
+
+function fail(title, sub, checks = []) {
+  render({ verdict: { kind: 'bad', title, sub }, checks });
+}
+
+async function verifyTx(hash) {
+  const checks = [];
+  let tx, rc;
+  try { [tx, rc] = await Promise.all([rpc('eth_getTransactionByHash', [hash]), rpc('eth_getTransactionReceipt', [hash])]); }
+  catch (e) { return fail("Couldn't read Robinhood Chain", e.message); }
+  if (!tx) return fail('Transaction not found', 'Robinhood Chain has no transaction with that hash. Check it was copied in full.');
+  const okStatus = rc && rc.status === '0x1';
+  checks.push({ state: okStatus ? 'ok' : 'bad', title: okStatus ? 'Read from Robinhood Chain: confirmed' : 'Read from Robinhood Chain: not confirmed', detail: `Block ${parseInt(tx.blockNumber, 16).toLocaleString('en-US')} · ${txLink(hash)}` });
+  const isToken = chain.token && tx.to && tx.to.toLowerCase() === chain.token.toLowerCase();
+  checks.push({ state: isToken ? 'ok' : 'bad', title: isToken ? 'It is a $INSULA token transfer' : 'Not a $INSULA transfer', detail: `Contract ${esc(tx.to || '')}` });
+  const t = decodeTransfer(tx.input);
+  if (!isToken || !t) return render({ verdict: { kind: 'bad', title: 'Not an Insula payment', sub: 'This transaction is not a $INSULA transfer with an Insula memo.' }, checks });
+  const dec = await tokenDecimals();
+  const amount = units(t.raw, dec);
+  const fromName = whoAddr(tx.from), toName = whoAddr(t.to);
+  checks.push({ state: 'ok', title: `${fmt(amount)} $INSULA from ${fromName || 'the bank or a wallet'} to ${toName || 'the bank or a wallet'}`, detail: `${esc(tx.from)} → ${esc(t.to)}` });
+  const memo = parseMemo(t.memo);
+  if (!memo) {
+    checks.push({ state: 'bad', title: 'No Insula memo in the input data' });
+    return render({ verdict: { kind: 'bad', title: 'No fingerprint', sub: 'This transfer carries no Insula memo.' }, checks, memo: t.memo });
+  }
+  if (memo.rule) {
+    checks.push({ state: 'ok', title: `Memo names the rule that made it: ${memo.rule}` });
+    return render({ verdict: { kind: 'rule', title: 'Rule payment', sub: 'Made automatically by an island rule, not by an agent decision.' }, checks, memo: t.memo, rule: memo.rule });
+  }
+  checks.push({ state: 'ok', title: `Memo points to decision ${memo.id}`, detail: `Fingerprint in the memo: <span class="mono">${memo.prefix}</span>` });
+  return checkRecord(memo.id, checks, { memo, rawMemo: t.memo, hash, amount });
+}
+
+async function checkRecord(id, checks, fromTx) {
+  let rec;
+  try {
+    const r = await fetch(`/api/decisions/${encodeURIComponent(id)}`);
+    rec = r.ok ? await r.json() : null;
+  } catch { rec = null; }
+  if (!rec) {
+    checks.push({ state: 'bad', title: `Decision record ${id} not found on this server` });
+    return render({ verdict: { kind: 'bad', title: "Couldn't find the record", sub: `The server has no record for ${id}.` }, checks, memo: fromTx?.rawMemo });
+  }
+  checks.push({ state: 'ok', title: `Fetched decision record ${rec.id} from insulaworld.com`, detail: `${esc(rec.name)} · Day ${esc(rec.day)}` });
+  if (!rec.canonical) {
+    checks.push({ state: 'bad', title: 'The record has no sealed copy to hash' });
+    return render({ verdict: { kind: 'bad', title: 'Not sealed', sub: 'This decision never moved money, so it was never fingerprinted.' }, checks, rec });
+  }
+  let h;
+  try { h = await sha256Hex(rec.canonical); }
+  catch { checks.push({ state: 'bad', title: "This browser can't compute SHA-256 here" }); return render({ verdict: { kind: 'bad', title: 'Could not hash', sub: 'Open this page over https.' }, checks, rec }); }
+  const recOk = h === rec.hash;
+  checks.push({ state: recOk ? 'ok' : 'bad', title: recOk ? 'Re-hashed the record in your browser: it matches its fingerprint' : 'Re-hashed the record: it does NOT match', detail: `<span class="mono">${h}</span>` });
+  let ok = recOk;
+  if (fromTx) {
+    const memoOk = h.slice(0, 16) === fromTx.memo.prefix;
+    checks.push({ state: memoOk ? 'ok' : 'bad', title: memoOk ? 'Matches the fingerprint written on-chain' : 'Does NOT match the fingerprint on-chain', detail: `on-chain ${fromTx.memo.prefix} · record ${h.slice(0, 16)}` });
+    const listed = (rec.txs || []).some((t) => t.sig && t.sig.toLowerCase() === fromTx.hash.toLowerCase());
+    checks.push({ state: listed ? 'ok' : 'bad', title: listed ? 'The record lists this exact payment' : "The record doesn't list this payment" });
+    ok = ok && memoOk && listed;
+  } else {
+    // Started from a decision ID: check each of its payments on-chain too.
+    for (const t of (rec.txs || []).filter((x) => x.sig)) {
+      try {
+        const tx = await rpc('eth_getTransactionByHash', [t.sig]);
+        const m = parseMemo(decodeTransfer(tx?.input)?.memo);
+        const good = m && m.id === rec.id && m.prefix === h.slice(0, 16);
+        checks.push({ state: good ? 'ok' : 'bad', title: `${good ? 'On-chain memo matches' : 'On-chain memo does NOT match'}: ${t.text}`, detail: txLink(t.sig) });
+        ok = ok && good;
+      } catch (e) {
+        checks.push({ state: 'skip', title: `Couldn't read ${t.text} from the chain`, detail: esc(e.message) });
+      }
+    }
+  }
+  render({
+    verdict: ok
+      ? { kind: 'ok', title: 'Verified', sub: fromTx ? `This payment carries the fingerprint of ${rec.name}'s decision ${rec.id}, unchanged since the money moved.` : `${rec.name}'s decision ${rec.id} matches the fingerprint on its payments.` }
+      : { kind: 'bad', title: 'Mismatch', sub: 'One or more checks failed. See below.' },
+    checks, rec, memo: fromTx?.rawMemo,
+  });
+}
+
+async function run(q) {
+  q = (q || '').trim();
+  if (!q) return;
+  $('#q').value = q;
+  history.replaceState(null, '', `/verify/${encodeURIComponent(q)}`);
+  $('#go').disabled = true;
+  $('#out').innerHTML = '<div class="card fine">Checking…</div>';
+  try {
+    if (/^0x[0-9a-fA-F]{64}$/.test(q)) await verifyTx(q);
+    else if (/^D\d+$/i.test(q)) await checkRecord(q.toUpperCase(), []);
+    else fail('Not a hash or decision ID', 'Paste a transaction hash (0x followed by 64 characters) or a decision ID like D1234.');
+  } catch (e) {
+    fail('Something went wrong', e.message);
+  }
+  $('#go').disabled = false;
+  $('#out').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function init() {
+  try {
+    const s = await fetch('/api/state').then((r) => r.json());
+    chain = s.chain || {};
+    for (const a of s.agents || []) names[a.id] = { name: a.name, address: a.address };
+  } catch { chain = {}; }
+  $('#f').addEventListener('submit', (e) => { e.preventDefault(); run($('#q').value); });
+  try {
+    const recent = (await fetch('/api/decisions?limit=40').then((r) => r.json())).filter((r) => r.txs?.some((t) => t.sig)).slice(0, 8);
+    $('#recent').innerHTML = recent.length ? recent.map((r) => {
+      const t = r.txs.find((x) => x.sig);
+      return `<li><a href="/verify/${t.sig}" data-q="${t.sig}"><span class="id">${esc(r.id)}</span><span>${esc(t.text)}</span><span class="go">verify →</span></a></li>`;
+    }).join('') : '<li class="fine">No payments yet.</li>';
+    $('#recent').addEventListener('click', (e) => { const a = e.target.closest('a[data-q]'); if (a) { e.preventDefault(); run(a.dataset.q); } });
+  } catch { $('#recent').innerHTML = '<li class="fine">Couldn’t load recent payments.</li>'; }
+  const m = location.pathname.match(/^\/verify\/(.+)$/);
+  const q = m ? decodeURIComponent(m[1]) : new URLSearchParams(location.search).get('q');
+  if (q) run(q);
+}
+init();
+</script>
+</body>
+</html>

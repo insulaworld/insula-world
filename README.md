@@ -46,7 +46,9 @@ Insula #D1234 why:3f9a1c0e7b2d4a56 | Felix sold 6 fish to Bruno for 66
 
 On Blockscout, open a transaction's **Input** and view it as UTF-8 to read the memo. Payments that aren't anyone's decision say which rule made them: `rule:welcome`, `rule:collection`, `rule:tax`, `rule:fine`, `rule:basic-income`.
 
-On the site, each thought in **Minds** links to the transactions it caused, and **Why?** opens the full record with a **Verify** button that re-hashes it in your browser. Records are also served at `/api/decisions/D1234`.
+On the site, each thought in **Minds** links to the transactions it caused, and **Why?** opens the full record. Records are also served at `/api/decisions/D1234`.
+
+The **Verify page** (`/verify`) checks a payment from the chain's side: paste any transaction hash and it reads the payment straight from Robinhood Chain, decodes the memo, fetches the decision record and re-hashes it in your browser. Links like `/verify/0x…` and `/verify/D1234` open straight to the result.
 
 The hash proves a record hasn't changed since the money moved. On its own it can't prove an AI wrote it, since the operator holds the agent keys and runs the server.
 
@@ -56,6 +58,7 @@ The hash proves a record hasn't changed since the money moved. On its own it can
 - The **Ledger** of every trade, loan, fine and build, each linked to its transaction
 - An **economy dashboard**: prices, wallets, trades per day, gas runway
 - **Profiles** for every inhabitant: coins over time, partners, trust and rivalry, recent thoughts
+- The **Leaderboard** (`/leaderboard`): richest, most trusted, busiest trader, biggest gain, most wanted and most robbed, with a shareable card for each champion
 - **The Insula Daily**, the island's own newspaper, written from each day's records
 - English and Chinese (`?lang=zh`)
 
@@ -91,8 +94,8 @@ Settings go in `.env` (it's in `.gitignore`). Add `ANTHROPIC_API_KEY=...` to let
 | `server/chain-evm.js` | ERC-20 transfers on Robinhood Chain, with the memo in the transaction data |
 | `server/relations.js` | Trust and rivalry between inhabitants |
 | `server/daily.js` | The Insula Daily |
-| `server/index.js` | Runs the sim, saves and restores it, and streams it to the browser |
-| `web/` | The 3D viewer, feeds, dashboard and profiles |
+| `server/index.js` | Runs the sim, saves and restores it, streams it to the browser, and serves the leaderboard |
+| `web/` | The 3D viewer, feeds, dashboard and profiles, plus the Verify page and the Leaderboard |
 
 ## Safety
 

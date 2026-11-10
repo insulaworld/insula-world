@@ -526,3 +526,8 @@ html.lang-zh #cams button, html.lang-zh .chip, html.lang-zh .tabs button, html.l
 #trades li.log.theft { color: #ffb2a6; font-style: normal; border-left: 2px solid var(--rose); border-radius: 0 8px 8px 0; animation: arrive 0.5s cubic-bezier(.2, .8, .2, 1), theftFlash 1.6s ease-out; }
 @keyframes theftFlash { 0% { background: rgba(255, 90, 70, 0.35); } 100% { background: transparent; } }
 #trades li.log.grudge { color: #ffd08a; font-style: normal; border-left: 2px solid #f0a64a; border-radius: 0 8px 8px 0; }
+a#verify-link, a#leader-link { color: var(--mint); text-decoration: none; }
+a#verify-link:hover, a#leader-link:hover { border-color: rgba(143, 240, 193, 0.5); }
+
+/* Laptop widths: keep the top bar on one row. The AI-brains count and film mode show on wide screens. */
+@media (min-width: 901px) and (max-width: 1599px) { #brain, #film { display: none; } }

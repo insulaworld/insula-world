@@ -1097,8 +1097,10 @@ function applyState(state) {
   const preview = state.chain.cluster === 'preview';
   const mode = $('#mode');
   const narrow = matchMedia('(max-width: 600px)').matches;
+  // Laptop widths: the top bar holds a lot of chips, so the long ones shorten to keep it on one row.
+  const mid = !narrow && matchMedia('(max-width: 1599px)').matches;
   const netName = (state.chain.network || `Solana ${state.chain.cluster === 'mainnet-beta' ? 'mainnet' : state.chain.cluster}`).toUpperCase();
-  mode.textContent = preview ? (narrow ? 'PREVIEW' : 'PREVIEW · TEST MONEY') : state.chain.mode === 'mock' ? (narrow ? 'TEST' : 'TEST MONEY') : narrow ? 'LIVE' : `LIVE · ${netName}`;
+  mode.textContent = preview ? (narrow ? 'PREVIEW' : 'PREVIEW · TEST MONEY') : state.chain.mode === 'mock' ? (narrow ? 'TEST' : 'TEST MONEY') : narrow || mid ? 'LIVE' : `LIVE · ${netName}`;
   explorerName = state.chain.explorer || 'Solscan';
   paperNetwork = state.chain.mode === 'mock' ? 'test money' : (state.chain.network || 'Solana');
   mode.className = `chip mono ${state.chain.mode === 'mock' ? 'test' : 'live'}`;
@@ -1110,7 +1112,7 @@ function applyState(state) {
   if (mint) {
     $('#buy').href = state.chain.buyUrl || '#';
     $('#buy').textContent = narrow ? 'BUY' : 'BUY $INSULA';
-    if (!$('#ca').dataset.copied) $('#ca').textContent = narrow ? 'CA ⧉' : `CA ${mint.slice(0, 4)}…${mint.slice(-4)} ⧉`;
+    if (!$('#ca').dataset.copied) $('#ca').textContent = narrow || mid ? 'CA ⧉' : `CA ${mint.slice(0, 4)}…${mint.slice(-4)} ⧉`;
     $('#ca').dataset.mint = mint;
   }
   $('#brain').textContent = `${state.llm.on ? 'AI BRAINS' : 'SIM BRAINS'} · ${fmt(state.decisions ?? 0)} DECISIONS`;
@@ -1375,7 +1377,8 @@ async function openWhy(id) {
     <h4>Fingerprint</h4>
     <p class="small">Each payment's memo carries <span class="mono">Insula #${rec.id} why:${rec.hash ? rec.hash.slice(0, 16) : '…'}</span>, the start of the SHA-256 hash of this decision record, written before the money moved.</p>
     <p class="mono hash">${rec.hash || 'not sealed yet'}</p>
-    ${rec.canonical ? `<button id="why-verify" type="button">Verify the fingerprint</button><p id="why-result" class="small"></p>` : ''}`;
+    ${rec.canonical ? `<button id="why-verify" type="button">Verify the fingerprint</button><p id="why-result" class="small"></p>` : ''}
+    ${rec.hash ? `<p class="small"><a href="/verify/${rec.id}" target="_blank" rel="noopener">Check it against Robinhood Chain on the Verify page ↗</a></p>` : ''}`;
   const btn = $('#why-verify');
   if (btn) btn.addEventListener('click', async () => {
     try {

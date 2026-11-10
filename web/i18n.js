@@ -107,7 +107,7 @@ const DICT = {
   // Feed
   Minds: '想法', Ledger: '账本', 'test transaction': '测试交易', Decision: '决策', Close: '关闭',
   'Loading the decision…': '正在加载决策…', 'This decision is no longer in the live log. Check the decision files on the server.': '这条决策已不在实时日志里。请查看服务器上的决策文件。',
-  Fingerprint: '指纹', 'On-chain': '链上记录', 'The negotiation': '谈判过程', 'No payment yet.': '还没有付款。', 'Verify the fingerprint': '验证指纹',
+  Fingerprint: '指纹', 'On-chain': '链上记录', 'The negotiation': '谈判过程', 'No payment yet.': '还没有付款。', 'Verify the fingerprint': '验证指纹', VERIFY: '验证', LEADERBOARD: '排行榜', 'Check it against Robinhood Chain on the Verify page ↗': '在验证页面对照 Robinhood 链上记录检查 ↗',
   "Each payment's memo carries": '每笔付款的备注里都带有',
   ', the start of the SHA-256 hash of this decision record, written before the money moved.': '，即这条决策记录 SHA-256 哈希值的开头，在付款之前写入。',
   'not sealed yet': '尚未封存', '✗ Mismatch: this record has changed since it was sealed.': '✗ 不匹配：这条记录在封存后被改动过。',
