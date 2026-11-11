@@ -194,6 +194,7 @@ class Agent {
   snapshot() {
     return {
       id: this.id, name: this.name, species: this.species, role: this.role || null, mayor: this.inOffice,
+      erc8004: this.sim.identity?.ids?.[this.id] ? { agentId: this.sim.identity.ids[this.id].agentId, url: this.sim.identity.ids[this.id].url } : null,
       // Elected mayors keep their own job; a mayor voted out shows as a former mayor.
       job: this.inOffice && this.role !== 'mayor' ? `${this.job} & mayor` : !this.inOffice && this.role === 'mayor' && this.sim.election?.office ? 'former mayor' : this.job,
       color: this.color, accent: this.accent,

@@ -119,7 +119,7 @@ function render(id, state, rel, decisions, econ) {
     <p class="prof-now">${esc(a.task)}${a.say ? ` · <q>${esc(a.say)}</q>` : ''}</p>
     <section class="econ-tiles prof-tiles">${tiles.map(([k, v, s]) => `<div class="econ-tile"><span class="mono k">${k}</span><b>${v}</b><span class="sub">${s}</span></div>`).join('')}</section>
     <section class="econ-card">
-      <div class="econ-card-head"><h3>Coins over time</h3><span class="mono econ-note">${a.accountUrl ? `wallet <a href="${a.accountUrl}" target="_blank" rel="noopener">${addr} ↗</a>` : addr}</span></div>
+      <div class="econ-card-head"><h3>Coins over time</h3><span class="mono econ-note">${a.accountUrl ? `wallet <a href="${a.accountUrl}" target="_blank" rel="noopener">${addr} ↗</a>` : addr}${a.erc8004 ? ` · <a href="${a.erc8004.url || '/agents/' + a.id + '.json'}" target="_blank" rel="noopener" title="On-chain AI agent identity (ERC-8004)">ERC-8004 agent #${a.erc8004.agentId} ↗</a>` : ''}</span></div>
       <div class="econ-chart" id="prof-coins"></div>
     </section>
     <section class="econ-card">

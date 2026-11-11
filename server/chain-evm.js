@@ -221,6 +221,20 @@ export class EvmChain {
     throw new Error('gas stayed above the ceiling for 15 minutes');
   }
 
+  // A contract call from one of the wallets (e.g. registering an agent identity). Queued like a payment,
+  // with the same gas ceiling and bank top-up. Returns the receipt, so callers can read its events.
+  contractCall(from, to, data) {
+    const job = this.queue.then(async () => {
+      await this.#waitForCheapGas();
+      await this.#ensureGas(from);
+      const hash = await this.#sendTx(from, { to, data });
+      const rcpt = await this.#receipt(hash);
+      return { hash, url: this.txUrl(hash), receipt: rcpt };
+    });
+    this.queue = job.catch(() => {});
+    return job;
+  }
+
   async #send(from, to, amount, memo) {
     if (this.balance(from) < amount) throw new Error(`${from} is broke`);
     await this.#waitForCheapGas();

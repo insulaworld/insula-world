@@ -34,6 +34,8 @@ Others arrive as the economy earns them: **Dot the Duck** (fisher), **Otto the O
 
 **Mayor elections.** Every 3 island days the animals elect their mayor. Each one decides for itself whether to run and on what platform: the property tax, the fine a caught thief pays, and whether the treasury funds public works or repays theft victims. A day later every animal votes, with its reason. The winner's platform becomes the island's rules (clamped to fixed limits in `server/election.js`), and a new mayor receives the treasury in an on-chain handover. Candidacies and votes are sealed decision records like every payment.
 
+**On-chain identities (ERC-8004).** Each animal is registered as an AI agent on the ERC-8004 Identity Registry on Robinhood Chain (`0x8004A169FB4a3325136EB29fA0ceB6D2e539a432`). It registered itself from its own wallet, so it owns its agent id. Each agent's registration file is at `/agents/<id>.json`, the domain proof at `/.well-known/agent-registration.json`, and every id at `/api/identity`.
+
 The **central bank** holds the seed supply, pays for exports, gives a small basic income to anyone who goes broke, and tops every agent up with a little ETH for gas. It never moves an agent's money.
 
 **The mainland** is the outside market. It buys exports and sells imports at a markup. Shipping a lot of one good floods the market, so export prices drop and then recover.
@@ -96,6 +98,7 @@ Settings go in `.env` (it's in `.gitignore`). Add `ANTHROPIC_API_KEY=...` to let
 | `server/chain-evm.js` | ERC-20 transfers on Robinhood Chain, with the memo in the transaction data |
 | `server/relations.js` | Trust and rivalry between inhabitants |
 | `server/daily.js` | The Insula Daily |
+| `server/identity.js` | ERC-8004: registers each animal as an on-chain AI agent and serves its registration file |
 | `server/election.js` | Mayor elections: campaigns, votes, the count and the treasury handover |
 | `server/index.js` | Runs the sim, saves and restores it, streams it to the browser, and serves the leaderboard |
 | `web/` | The 3D viewer, feeds, dashboard and profiles, plus the Verify page and the Leaderboard |

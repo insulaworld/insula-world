@@ -5,6 +5,8 @@ primary_region = "iad"
 [env]
   PORT = "8080"
   INSULA_SAVE = "/data/world.json"
+  # ERC-8004: each animal registers itself once as an on-chain AI agent (gas paid by the bank).
+  ERC8004 = "on"
 
 [[mounts]]
   source = "insula_data"

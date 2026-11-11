@@ -9,6 +9,7 @@ import { WebSocketServer } from 'ws';
 import { generateWorld } from './world.js';
 import { AGENT_DEFS } from './agents.js';
 import { createChain } from './chain.js';
+import { Identity } from './identity.js';
 import { Sim } from './sim.js';
 import { llmStats, llmUsage } from './brain.js';
 import { DEFAULT_DAY_MS } from './eras.js';
@@ -52,11 +53,14 @@ const world = generateWorld({ seed: Number(process.env.SEED || 1337) });
 const chain = await createChain(AGENT_DEFS.map((a) => a.id), saved?.mockBalances);
 if (chain.network) process.env.INSULA_NETWORK = chain.network.replace(/ testnet$/i, '');
 const sim = new Sim(world, chain, { dayMs: DAY_MS, saved });
+// ERC-8004: the animals' on-chain AI-agent identities (opt-in with ERC8004=on).
+const identity = new Identity(sim, saved?.identity);
+sim.identity = identity;
 
 function save() {
   fs.mkdirSync(path.dirname(SAVE), { recursive: true });
   const tmp = `${SAVE}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ ...sim.serialize(), chainId: CHAIN_ID }));
+  fs.writeFileSync(tmp, JSON.stringify({ ...sim.serialize(), identity: identity.save(), chainId: CHAIN_ID }));
   fs.renameSync(tmp, SAVE); // write-then-rename so a crash never leaves a half-written save
 }
 setInterval(save, 30_000);
@@ -73,6 +77,15 @@ app.use('/vendor/three', express.static(path.resolve('node_modules/three')));
 app.get('/api/state', (_req, res) => res.json(sim.state()));
 app.get('/api/world', (_req, res) => res.json(world));
 app.get('/api/election', (_req, res) => res.json(sim.election.view()));
+// ERC-8004: each agent's registration file (its agentURI), the domain proof, and the ids so far.
+app.get('/agents/:file', (req, res, next) => {
+  const m = /^([a-z]+)\.json$/.exec(req.params.file);
+  if (!m) return next();
+  const file = identity.registrationFile(m[1]);
+  return file ? res.json(file) : res.status(404).json({ error: 'No agent with that id.' });
+});
+app.get('/.well-known/agent-registration.json', (_req, res) => res.json(identity.wellKnown()));
+app.get('/api/identity', (_req, res) => res.json(identity.view()));
 app.get('/api/history', (_req, res) => res.json(sim.history));
 
 // The decision log: every agent decision that moved money, with the record whose fingerprint is in the memo.
@@ -185,6 +198,7 @@ server.listen(PORT, () => {
   console.log(`Brains: ${llm.on ? `AI (${llm.model})` : 'rule-based (set ANTHROPIC_API_KEY for AI brains)'}`);
   console.log(`Timeline: one genesis day = ${DAY_MS === DEFAULT_DAY_MS ? '24 hours' : `${DAY_MS / 1000}s (fast mode)`}. Saving to ${SAVE}\n`);
   sim.start();
+  identity.start();
 });
 
 // AI cost report every 10 minutes (and on /api/usage), so you can see what the brains cost before launch.
