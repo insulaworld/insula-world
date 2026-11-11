@@ -10,6 +10,7 @@ import { generateWorld } from './world.js';
 import { AGENT_DEFS } from './agents.js';
 import { createChain } from './chain.js';
 import { Identity } from './identity.js';
+import { Reputation } from './reputation.js';
 import { Sim } from './sim.js';
 import { llmStats, llmUsage } from './brain.js';
 import { DEFAULT_DAY_MS } from './eras.js';
@@ -56,11 +57,14 @@ const sim = new Sim(world, chain, { dayMs: DAY_MS, saved });
 // ERC-8004: the animals' on-chain AI-agent identities (opt-in with ERC8004=on).
 const identity = new Identity(sim, saved?.identity);
 sim.identity = identity;
+const reputation = new Reputation(sim, identity, saved?.reputation);
+sim.reputation = reputation;
+sim.on((e) => { try { reputation.record(e); } catch (err) { console.error('[reputation] record', err.message); } });
 
 function save() {
   fs.mkdirSync(path.dirname(SAVE), { recursive: true });
   const tmp = `${SAVE}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ ...sim.serialize(), identity: identity.save(), chainId: CHAIN_ID }));
+  fs.writeFileSync(tmp, JSON.stringify({ ...sim.serialize(), identity: identity.save(), reputation: reputation.save(), chainId: CHAIN_ID }));
   fs.renameSync(tmp, SAVE); // write-then-rename so a crash never leaves a half-written save
 }
 setInterval(save, 30_000);
@@ -86,6 +90,15 @@ app.get('/agents/:file', (req, res, next) => {
 });
 app.get('/.well-known/agent-registration.json', (_req, res) => res.json(identity.wellKnown()));
 app.get('/api/identity', (_req, res) => res.json(identity.view()));
+// On-chain reputation (ERC-8004): what the animals rated each other, and each rating's public feedback file.
+app.get('/api/reputation', (_req, res) => res.json(reputation.view()));
+app.get('/api/reputation/:id', (req, res) => (sim.agents[req.params.id] ? res.json(reputation.agentView(req.params.id)) : res.status(404).json({ error: 'no such animal' })));
+app.get('/rep/:file', (req, res) => {
+  const m = /^(R\d+)\.json$/.exec(req.params.file);
+  const text = m && reputation.files[m[1]];
+  if (!text) return res.status(404).json({ error: 'no such rating' });
+  res.type('application/json').send(text); // byte-for-byte what was hashed on-chain
+});
 app.get('/api/history', (_req, res) => res.json(sim.history));
 
 // The decision log: every agent decision that moved money, with the record whose fingerprint is in the memo.
@@ -105,6 +118,7 @@ try {
   if (n) console.log(`Relationships: rebuilt ${n} past interactions from the decision files.`);
 } catch (e) { console.error('[relations] backfill', e.message); }
 sim.on((e) => { try { relations.record(e); } catch {} });
+reputation.relations = relations; // for the one-time history rating
 // First run with grudges: victims of thefts before grudges existed half-remember who did it.
 try {
   const thieves = Object.values(sim.agents).filter((a) => a.role === 'thief');
@@ -199,6 +213,7 @@ server.listen(PORT, () => {
   console.log(`Timeline: one genesis day = ${DAY_MS === DEFAULT_DAY_MS ? '24 hours' : `${DAY_MS / 1000}s (fast mode)`}. Saving to ${SAVE}\n`);
   sim.start();
   identity.start();
+  reputation.start();
 });
 
 // AI cost report every 10 minutes (and on /api/usage), so you can see what the brains cost before launch.

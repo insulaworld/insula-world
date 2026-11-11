@@ -1307,6 +1307,7 @@ export class Sim {
         } else {
           loan.status = 'defaulted';
           this.log(`${who.name} defaulted on ${loan.owed} coins owed to ${banker.name}.`);
+          this.emit({ type: 'credit', kind: 'default', from: who.id, to: banker.id, owed: loan.owed });
         }
       } catch (e) {
         loan.status = 'open';

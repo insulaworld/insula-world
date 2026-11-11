@@ -36,14 +36,15 @@ export async function openProfile(id) {
   document.body.classList.add('econ-open');
   $('#prof-body').innerHTML = '<p class="econ-empty">Loading…</p>';
   try {
-    const [state, rel, dec, econ] = await Promise.all([
+    const [state, rel, dec, econ, rep] = await Promise.all([
       fetch('/api/state').then((r) => r.json()),
       fetch('/api/relations').then((r) => r.json()),
       fetch(`/api/decisions?agent=${encodeURIComponent(id)}&limit=500`).then((r) => r.json()),
       getEconomy(),
+      fetch(`/api/reputation/${encodeURIComponent(id)}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
     ]);
     if (current !== id) return;
-    render(id, state, rel, dec, econ);
+    render(id, state, rel, dec, econ, rep);
     wrap.scrollTop = 0;
   } catch (err) {
     console.error(err);
@@ -51,7 +52,30 @@ export async function openProfile(id) {
   }
 }
 
-function render(id, state, rel, decisions, econ) {
+// On-chain reputation (ERC-8004): the ratings the other animals left about this one in the reputation registry.
+const TAG_NAME = { trade: 'Trades', contract: 'Build jobs', credit: 'Loans', default: 'Defaults', theft: 'Thefts', history: 'Since day 1' };
+function repCard(rep, a, byId) {
+  if (!rep || rep.status === 'off' || !rep.agentId) return '';
+  const explorer = a.accountUrl ? new URL(a.accountUrl).origin : null;
+  const reg = explorer ? `<a href="${explorer}/address/${rep.registry}" target="_blank" rel="noopener">reputation registry ↗</a>` : 'the ERC-8004 reputation registry';
+  const tone = (v) => (v >= 80 ? 'good' : v >= 50 ? 'mid' : 'bad');
+  if (!rep.count) {
+    return `<section class="econ-card"><div class="econ-card-head"><h3>On-chain reputation</h3><span class="mono econ-note">ERC-8004 · ${reg}</span></div>
+      <p class="econ-empty">${rep.pending ? `${rep.pending} rating${rep.pending > 1 ? 's' : ''} on the way to the chain.` : 'No ratings yet.'} Every island day, each animal rates the ones it dealt with, from its own wallet, and anyone who catches a thief rates them on the spot.</p></section>`;
+  }
+  const tags = Object.entries(rep.byTag).sort((x, y) => y[1].count - x[1].count).map(([k, v]) => `<span class="rep-tag ${tone(v.score)}"><span class="mono">${(TAG_NAME[k] || k).toUpperCase()}</span><b>${v.score}</b><i class="mono">${v.count}</i></span>`).join('');
+  const rows = rep.recent.map((r) => `<li><b class="rep-v ${tone(r.value)}">${r.value}</b><div><p><span class="who">${esc(byId[r.from]?.name || r.from)}</span> · ${esc(TAG_NAME[r.tag] || r.tag)} · day ${r.day}</p><span class="mono">${esc(r.summary)}${r.tx ? ` · <a href="${esc(r.tx)}" target="_blank" rel="noopener">on-chain ↗</a>` : ''} · <a href="${esc(r.file)}" target="_blank" rel="noopener">file ↗</a></span></div></li>`).join('');
+  const chain = rep.onchain?.count ? `the registry itself reports ${rep.onchain.count} rating${rep.onchain.count === 1 ? '' : 's'} from island wallets, average ${Math.round(rep.onchain.value)}` : '';
+  return `<section class="econ-card">
+      <div class="econ-card-head"><h3>On-chain reputation</h3><span class="mono econ-note">ERC-8004 agent #${esc(rep.agentId)} · ${reg}</span></div>
+      <div class="rep-top"><div class="rep-score ${tone(rep.score)}"><b>${rep.score}</b><span class="mono">/100</span></div>
+        <p>From <b>${rep.count}</b> rating${rep.count === 1 ? '' : 's'} by <b>${rep.raters}</b> animal${rep.raters === 1 ? '' : 's'} who dealt with ${esc(a.name)}, written to Robinhood Chain from their own wallets.${chain ? ` <span class="mono">${chain}</span>` : ''}</p></div>
+      <div class="rep-tags">${tags}</div>
+      <ul class="rep-list">${rows}</ul>
+    </section>`;
+}
+
+function render(id, state, rel, decisions, econ, rep) {
   const a = state.agents.find((x) => x.id === id);
   if (!a) { $('#prof-body').innerHTML = '<p class="econ-empty">This animal hasn\'t arrived yet.</p>'; return; }
   const byId = Object.fromEntries(state.agents.map((x) => [x.id, x]));
@@ -122,6 +146,7 @@ function render(id, state, rel, decisions, econ) {
       <div class="econ-card-head"><h3>Coins over time</h3><span class="mono econ-note">${a.accountUrl ? `wallet <a href="${a.accountUrl}" target="_blank" rel="noopener">${addr} ↗</a>` : addr}${a.erc8004 ? ` · <a href="${a.erc8004.url || '/agents/' + a.id + '.json'}" target="_blank" rel="noopener" title="On-chain AI agent identity (ERC-8004)">ERC-8004 agent #${a.erc8004.agentId} ↗</a>` : ''}</span></div>
       <div class="econ-chart" id="prof-coins"></div>
     </section>
+    ${repCard(rep, a, byId)}
     <section class="econ-card">
       <div class="econ-card-head"><h3>Neighbors</h3><span class="mono econ-note">trust grows with deals kept; rivalry with walk-aways, defaults and theft</span></div>
       <div class="prof-rels">${relRows || '<p class="econ-empty">No dealings yet.</p>'}</div>

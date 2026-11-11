@@ -7,6 +7,10 @@ primary_region = "iad"
   INSULA_SAVE = "/data/world.json"
   # ERC-8004: each animal registers itself once as an on-chain AI agent (gas paid by the bank).
   ERC8004 = "on"
+  # ERC-8004 reputation: the animals rate each other on-chain after their deals (one rating per pair per day).
+  ERC8004_REPUTATION = "on"
+  # Once: the animals also rate everything they did together since day 1 (runs a single time, then never again).
+  ERC8004_REPUTATION_HISTORY = "on"
 
 [[mounts]]
   source = "insula_data"

@@ -127,6 +127,7 @@ export class Identity {
         { name: 'web', endpoint: `${base}/#profile-${id}` },
         { name: 'leaderboard', endpoint: `${base}/leaderboard` },
         { name: 'decisions', endpoint: `${base}/api/decisions?agent=${id}` },
+        { name: 'reputation', endpoint: `${base}/api/reputation/${id}` },
       ],
       x402Support: false,
       active: true,
