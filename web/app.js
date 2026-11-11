@@ -1088,6 +1088,7 @@ function renderCard(rec) {
 
 function applyState(state) {
   latest = state;
+  dispatchEvent(new CustomEvent('insula:state', { detail: state }));
   latestAt = performance.now();
   syncBuildings(state.buildings || []);
   syncCams(state.agents);
@@ -1359,7 +1360,8 @@ async function openWhy(id) {
   if (!rec) { $('#why-body').innerHTML = '<p class="muted">This decision is no longer in the live log. Check the decision files on the server.</p>'; return; }
   const who = (aid) => agents.get(aid)?.data.name || aid;
   const inv = Object.entries(rec.saw.inv || {}).filter(([, v]) => v).map(([k, v]) => `${v} ${k}`).join(', ') || 'nothing';
-  const steps = (rec.steps || []).map((st) => st.said
+  const ballot = (rec.steps || []).find((st) => st.election);
+  const steps = (rec.steps || []).filter((st) => st.who).map((st) => st.said
     ? `<li><b>${esc(who(st.who))}</b> said “${esc(st.said)}”</li>`
     : `<li class="thought"><b>${esc(who(st.who))}</b> thought: ${esc(st.thought)}${st.action ? ` <span class="act">${esc(st.action)}</span>` : ''}</li>`).join('');
   const txs = (rec.txs || []).map((t) => `<li>${esc(t.text)} · ${fmt(t.amount)} coins · ${t.url ? `<a href="${t.url}" target="_blank" rel="noopener">view on ${explorerName} ↗</a>` : 'test transaction'}</li>`).join('');
@@ -1372,13 +1374,14 @@ async function openWhy(id) {
     <p class="thought">“${esc(rec.thought)}”</p>
     <p class="mono small">choice: ${esc(rec.choice)}${rec.qty ? ` · qty ${rec.qty}` : ''}${rec.price ? ` · price ${rec.price}` : ''}</p>
     ${steps ? `<h4>The negotiation</h4><ol class="steps">${steps}</ol>` : ''}
-    <h4>On-chain</h4>
-    <ol class="steps">${txs || '<li>No payment yet.</li>'}</ol>
+    ${ballot ? `<h4>Election ${ballot.election}</h4><p class="small">Rules at the time: tax ${ballot.policy.tax}, fine ${ballot.policy.fine}, ${esc(ballot.policy.focus)}.${ballot.candidates ? ` On the ballot: ${ballot.candidates.map((c) => esc(c.split(':')[0])).join(', ')}.` : ''}</p>` : ''}
+    ${ballot ? '' : `<h4>On-chain</h4>
+    <ol class="steps">${txs || '<li>No payment yet.</li>'}</ol>`}
     <h4>Fingerprint</h4>
-    <p class="small">Each payment's memo carries <span class="mono">Insula #${rec.id} why:${rec.hash ? rec.hash.slice(0, 16) : '…'}</span>, the start of the SHA-256 hash of this decision record, written before the money moved.</p>
+    <p class="small">${ballot ? 'This decision moved no money, so nothing went on-chain. It was sealed the moment it was made: this is the SHA-256 hash of the record above, and any later change would break it.' : `Each payment's memo carries <span class="mono">Insula #${rec.id} why:${rec.hash ? rec.hash.slice(0, 16) : '…'}</span>, the start of the SHA-256 hash of this decision record, written before the money moved.`}</p>
     <p class="mono hash">${rec.hash || 'not sealed yet'}</p>
     ${rec.canonical ? `<button id="why-verify" type="button">Verify the fingerprint</button><p id="why-result" class="small"></p>` : ''}
-    ${rec.hash ? `<p class="small"><a href="/verify/${rec.id}" target="_blank" rel="noopener">Check it against Robinhood Chain on the Verify page ↗</a></p>` : ''}`;
+    ${rec.hash && !ballot ? `<p class="small"><a href="/verify/${rec.id}" target="_blank" rel="noopener">Check it against Robinhood Chain on the Verify page ↗</a></p>` : ''}`;
   const btn = $('#why-verify');
   if (btn) btn.addEventListener('click', async () => {
     try {

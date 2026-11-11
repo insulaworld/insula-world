@@ -11,6 +11,7 @@ import {
 } from './agents.js';
 import { ERAS, DEFAULT_DAY_MS } from './eras.js';
 import * as brain from './brain.js';
+import { Election } from './election.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
@@ -84,6 +85,9 @@ class Agent {
     this.memory.push(text);
     if (this.memory.length > 14) this.memory.shift();
   }
+
+  // Holding the mayor's office right now (won the last election, or the first mayor before any election).
+  get inOffice() { return this.sim.isMayor(this); }
 
   // The decision record this agent's words currently belong to: the deal it's in, or its own latest decision.
   activeRecord() { return this.dealRec || this.decision || null; }
@@ -189,7 +193,9 @@ class Agent {
 
   snapshot() {
     return {
-      id: this.id, name: this.name, species: this.species, job: this.job, role: this.role || null,
+      id: this.id, name: this.name, species: this.species, role: this.role || null, mayor: this.inOffice,
+      // Elected mayors keep their own job; a mayor voted out shows as a former mayor.
+      job: this.inOffice && this.role !== 'mayor' ? `${this.job} & mayor` : !this.inOffice && this.role === 'mayor' && this.sim.election?.office ? 'former mayor' : this.job,
       color: this.color, accent: this.accent,
       x: +this.x.toFixed(3), z: +this.z.toFixed(3), y: groundY(this.sim.world, this.x, this.z),
       heading: +this.heading.toFixed(3),
@@ -242,6 +248,7 @@ export class Sim {
     this.decisionSeq = saved?.decisionSeq || 1;
     this.decisionLog = new Map(); // recent decision records by id (older ones live in the decision files)
     this.daily = new Reporter(this, saved?.daily);
+    this.election = new Election(this, saved?.election);
     this.shippedAt = Date.now();
     this.agents = {};
     const m = world.places.market;
@@ -298,6 +305,20 @@ export class Sim {
     return { ...res, decision: rec?.id || null, hash: rec?.hash || null, rule: rec ? null : how.rule };
   }
 
+  // Seal a decision record that moves no money (a candidacy, a vote): fingerprint it like a payment decision
+  // and write it to the decision files, so it can be looked up at /api/decisions/<id>.
+  async seal(rec) {
+    rec.canonical = canonical(rec);
+    rec.hash = await sha256(rec.canonical);
+    this.decisionLog.set(rec.id, rec);
+    if (this.decisionLog.size > 3000) this.decisionLog.delete(this.decisionLog.keys().next().value);
+    this.emit({ type: 'decision', record: rec });
+    return rec;
+  }
+
+  // An automatic payment under a named rule (the election's treasury handover, theft relief).
+  rulePayment(from, to, amount, text, rule) { return this.#pay(from, to, amount, text, { rule }); }
+
   #release(a, b) {
     a.engaged = b.engaged = false;
     a.dealRec = b.dealRec = null;
@@ -326,6 +347,8 @@ export class Sim {
   builtCount() { return this.buildings.filter((b) => b.kind === 'private' && b.progress >= 1).length; }
   isNight() { const t = ((Date.now() - this.started) % SKY_MS) / SKY_MS; return t > 0.7 && t < 0.97; }
   byRole(role) { return Object.values(this.agents).filter((a) => a.role === role); }
+  isMayor(agent) { return Boolean(agent) && this.election?.mayorId() === agent.id; }
+  mayor() { return this.agents[this.election?.mayorId()] || null; }
   exportBoost() { return 1 + (this.projectDone('lighthouse') ? 0.15 : 0) + (this.projectDone('harbor') ? 0.15 : 0); }
   #fadeGlut() {
     const k = Math.exp(-(Date.now() - this.shippedAt) / GLUT_FADE_MS);
@@ -398,6 +421,7 @@ export class Sim {
       market: this.market, decisions: this.decisions, loans: this.loans, jobs: this.jobs, buildings: this.buildings,
       credit: this.credit, nextId: this.nextId, unlocked: [...this.unlocked], projects: this.projects,
       lastTaxDay: this.lastTaxDay, stats: this.stats, takenPlots: [...this.takenPlots], shipped: this.shipped, decisionSeq: this.decisionSeq,
+      election: this.election.save(),
       agents: Object.values(this.agents).map((a) => a.save()),
       history: this.history.slice(-80), thoughts: this.thoughts.slice(-80), news: this.news, daily: this.daily.save(),
       mockBalances: this.chain.mode === 'mock' ? this.chain.balances : undefined,
@@ -434,6 +458,7 @@ export class Sim {
         thefts: this.stats.thefts,
         taxes: this.stats.taxes,
       },
+      election: this.election.view(),
     };
   }
 
@@ -464,8 +489,20 @@ export class Sim {
       projects: Object.values(this.projects).filter((p) => p.status === 'funding').map((p) => ({ id: p.id, label: PROJECTS[p.id].label, funded: Math.round(p.funded), need: p.need, perk: PROJECTS[p.id].perk })),
       refusals: Object.fromEntries(Object.entries(agent.refusals).filter(([, v]) => Date.now() - v.ts < 150_000).map(([k, v]) => [k, v.price])),
       grudges: Object.values(this.agents).filter((a) => a !== agent && agent.grudge(a.id) >= 0.5).map((a) => ({ id: a.id, name: a.name, level: Math.round(agent.grudge(a.id) * 10) / 10 })),
+      isMayor: this.isMayor(agent),
+      treasury: this.isMayor(agent) ? Math.round(this.election.office?.treasury ?? this.chain.balance(agent.id)) : null,
+      policy: this.election.policy(),
+      election: this.#electionNote(),
       watchedBy: agent.role === 'thief' ? Object.values(this.agents).filter((a) => a !== agent && a.grudge(agent.id) >= 2).map((a) => a.name) : [],
     };
+  }
+
+  // One line for every animal's briefing while a campaign is on.
+  #electionNote() {
+    const e = this.election, cur = e.current;
+    if (e.phase !== 'campaign' || !cur?.candidates?.length) return null;
+    const left = Math.max(0, e.voteAt - Date.now());
+    return `Election ${cur.n} for mayor, vote in ${left >= 3600_000 ? `${Math.round(left / 3600_000)}h` : `${Math.ceil(left / 60_000)}m`}: ${cur.candidates.map((c) => `${c.name} (tax ${c.tax}, fine ${c.fine}, ${c.focus})`).join(' vs ')}`;
   }
 
   // Footprints of everything standing (or going up), padded so animals stay outside the walls.
@@ -615,6 +652,7 @@ export class Sim {
     }
     this.#checkEras();
     this.daily.start();
+    this.election.start();
     for (const a of Object.values(this.agents)) this.#loop(a);
   }
 
@@ -772,7 +810,10 @@ export class Sim {
     for (const p of Object.values(this.projects)) {
       if (p.status !== 'funding' || !p.builder || p.builder === agent.id) continue;
       const left = p.need - p.funded;
-      if (coins > 300) opts.push({ id: `donate:${p.id}`, action: agent.role === 'mayor' ? 'fund' : 'donate', project: p.id, maxQty: Math.round(Math.min(left, coins - 150)), label: `${agent.role === 'mayor' ? 'fund from the treasury' : 'donate to'} the ${PROJECTS[p.id].label} (${Math.round(p.funded)}/${p.need} raised; ${PROJECTS[p.id].perk})` });
+      // The mayor spends from the treasury (taxes collected), not from their own pocket.
+      const treasury = this.isMayor(agent) ? Math.min(coins - 150, this.election.office?.treasury ?? coins) : 0;
+      if (treasury >= 50) opts.push({ id: `donate:${p.id}`, action: 'fund', project: p.id, maxQty: Math.round(Math.min(left, treasury)), label: `fund from the treasury the ${PROJECTS[p.id].label} (${Math.round(p.funded)}/${p.need} raised; ${PROJECTS[p.id].perk}; treasury ${Math.round(treasury)})` });
+      else if (coins > 300) opts.push({ id: `donate:${p.id}`, action: 'donate', project: p.id, maxQty: Math.round(Math.min(left, coins - 150)), label: `donate to the ${PROJECTS[p.id].label} (${Math.round(p.funded)}/${p.need} raised; ${PROJECTS[p.id].perk})` });
     }
 
     // After dark, someone may help himself to unattended goods
@@ -783,7 +824,7 @@ export class Sim {
       }
     }
 
-    const restLabel = { banker: 'mind the bank', mayor: 'hold office hours at the Town Hall' }[agent.role] || 'rest for a bit';
+    const restLabel = this.isMayor(agent) && this.projectDone('townhall') ? 'hold office hours at the Town Hall' : { banker: 'mind the bank' }[agent.role] || 'rest for a bit';
     opts.push({ id: 'rest', action: 'rest', label: restLabel });
     return opts;
   }
@@ -838,14 +879,14 @@ export class Sim {
 
   async #rest(agent) {
     const s = this.world.sites, m = this.world.places.market;
+    if (this.isMayor(agent) && this.projectDone('townhall') && (agent.role !== 'banker' || Math.random() < 0.5)) {
+      agent.task = 'holding office hours';
+      await agent.walkTo(s.townhall.x, s.townhall.z + 3.2);
+      return agent.wait(6000);
+    }
     if (agent.role === 'banker') {
       agent.task = 'minding the bank';
       await agent.walkTo(m.x - 2.2 + (agent.id === 'ivy' ? 4.4 : 0), m.z - 1.4);
-      return agent.wait(6000);
-    }
-    if (agent.role === 'mayor' && this.projectDone('townhall')) {
-      agent.task = 'holding office hours';
-      await agent.walkTo(s.townhall.x, s.townhall.z + 3.2);
       return agent.wait(6000);
     }
     agent.task = 'resting';
@@ -1439,14 +1480,16 @@ export class Sim {
     if (!p || p.status !== 'funding') return;
     const builder = this.agents[p.builder];
     if (!builder) return;
-    const amount = Math.round(Math.max(20, Math.min(qty || 100, p.need - p.funded, this.chain.balance(agent.id) - 100)));
+    const mayor = this.isMayor(agent) && (this.election.office?.treasury ?? 0) >= 20;
+    const cap = mayor ? this.election.office.treasury : Infinity;
+    const amount = Math.round(Math.max(20, Math.min(qty || 100, p.need - p.funded, this.chain.balance(agent.id) - 100, cap)));
     if (amount < 20) return;
     const label = PROJECTS[projectId].label;
-    const mayor = agent.role === 'mayor';
     const text = mayor ? `Mayor ${agent.name} put ${amount} treasury coins toward the ${label}` : `${agent.name} donated ${amount} coins to the ${label}`;
     try {
       const res = await this.#pay(agent.id, builder.id, amount, text, { by: agent });
       p.funded += amount;
+      if (mayor) this.election.onFund(amount);
       p.donors[agent.id] = (p.donors[agent.id] || 0) + amount;
       this.stats.donations += amount;
       this.#record(null, 0, amount);
@@ -1467,16 +1510,19 @@ export class Sim {
 
   // The mayor collects a small property tax once per genesis day.
   async #collectTax() {
-    const mayor = this.byRole('mayor')[0];
-    if (!mayor || !this.has('tax')) return;
+    if (!this.has('tax')) return;
+    this.election.ensureOffice();
+    const mayor = this.mayor();
+    if (!mayor) return;
+    const rate = this.election.policy().tax;
     const day = this.genesisDay();
     if (day <= this.lastTaxDay) return;
     this.lastTaxDay = day;
     let total = 0;
     for (const b of this.buildings.filter((x) => x.kind === 'private' && x.owner && x.owner !== mayor.id && x.progress >= 1)) {
       const owner = this.agents[b.owner];
-      const tax = 8 * b.level;
-      if (!owner || this.chain.balance(owner.id) < tax + 50) continue;
+      const tax = rate * b.level;
+      if (!tax || !owner || this.chain.balance(owner.id) < tax + 50) continue;
       try {
         const res = await this.#pay(owner.id, mayor.id, tax, `property tax on ${owner.name}'s ${b.type}`, { rule: 'tax' });
         total += tax;
@@ -1487,6 +1533,7 @@ export class Sim {
     }
     if (total) {
       this.stats.taxes += total;
+      this.election.onTax(total);
       mayor.think(`Tax day: ${total} coins collected. The treasury now funds public works for everyone.`, 'TAX DAY');
     }
   }
@@ -1538,6 +1585,7 @@ export class Sim {
       thief.think(`Got ${n} ${item} off ${victim.name}. Nobody saw a thing.`, 'GOT AWAY');
       this.log(`${n} ${item} went missing from ${victim.name} in the night.`);
       this.emit({ type: 'story', kind: 'theft', thief: thief.id, victim: victim.id, item, n, caught: false });
+      this.#relief(victim, item, n).catch((e) => console.error('[sim] relief', e));
       if (Math.random() < SUSPECT_ODDS) {
         victim.holdGrudge(thief.id, 1);
         victim.remember(`${n} ${item} went missing in the night; pretty sure it was ${thief.name}`);
@@ -1556,13 +1604,14 @@ export class Sim {
     victim.speak(watching > 0 ? `I KNEW it was you, ${thief.name}! Give it back!` : `Hey! THIEF! Give back my ${item}!`, 3600);
     thief.speak(brain.pick(['Just... borrowing it.', 'This? I found this.', 'Wrong raccoon!']));
     this.mood(victim, 'angry');
-    const mayor = this.byRole('mayor')[0];
-    const fine = 80;
+    const mayor = this.mayor();
+    const fine = this.election.policy().fine;
     if (mayor && this.chain.balance(thief.id) >= fine) {
       try {
-        const text = `Mayor ${mayor.name} fined ${thief.name} ${fine} coins for stealing from ${victim.name}`;
+        const text = mayor === thief ? `Mayor ${thief.name} was fined ${fine} coins under their own rules for stealing from ${victim.name}` : `Mayor ${mayor.name} fined ${thief.name} ${fine} coins for stealing from ${victim.name}`;
         const res = await this.#pay(thief.id, victim.id, fine, text, { rule: 'fine' });
         this.emit({ type: 'trade', kind: 'fine', from: thief.id, to: victim.id, amount: fine, text, ...res });
+        this.election.onFine(fine);
         mayor.think(`${thief.name} was caught taking ${victim.name}'s ${item}. ${fine}-coin fine, paid to the victim.`, 'FINE');
       } catch (e) {
         this.#chainError(e, 'fine');
@@ -1571,6 +1620,22 @@ export class Sim {
       this.log(`${victim.name} caught ${thief.name} stealing ${item}. The goods were returned.`);
     }
     thief.think(`Caught by ${victim.name}. Had to give back the ${item}${mayor ? ` and pay a ${fine}-coin fine` : ''}. Need to be quieter.`, 'CAUGHT');
+  }
+
+  // Theft relief: under a mayor elected on "relief", the treasury repays goods stolen in the night (at fair price).
+  async #relief(victim, item, n) {
+    const o = this.election.office, mayor = this.mayor();
+    if (!o || o.policy.focus !== 'relief' || !mayor || mayor === victim) return;
+    const amount = this.election.reliefFor(item, n);
+    if (amount < 5 || o.treasury < amount || this.chain.balance(mayor.id) < amount + 50) return;
+    try {
+      const text = `the treasury repaid ${victim.name} ${amount} coins for ${n} stolen ${item}`;
+      const res = await this.#pay(mayor.id, victim.id, amount, text, { rule: 'relief' });
+      this.election.onRelief(amount);
+      this.emit({ type: 'trade', kind: 'relief', from: mayor.id, to: victim.id, amount, text: `Mayor ${mayor.name}'s treasury repaid ${victim.name} ${amount} coins for stolen ${item}`, ...res });
+    } catch (e) {
+      this.#chainError(e, 'relief');
+    }
   }
 
   // The central bank tops up anyone who goes broke, so the economy never stalls.

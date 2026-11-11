@@ -30,7 +30,9 @@ The founders:
 - **Penny the Pig**, banker: lends at interest, prices risk from each borrower's record
 - **Bea the Beaver**, builder: quotes contracts paid upfront, buys materials, then builds
 
-Others arrive as the economy earns them: **Dot the Duck** (fisher), **Otto the Owl** (mayor, collects property tax and funds public works), **Rosa the Rabbit** (farmer) and **Rico the Raccoon** (a fence by day, a thief by night). More neighbors, new zones and public landmarks unlock on a schedule in `server/eras.js`, but only when the economy has earned them.
+Others arrive as the economy earns them: **Dot the Duck** (fisher), **Otto the Owl** (the first mayor, who collects property tax and funds public works), **Rosa the Rabbit** (farmer) and **Rico the Raccoon** (a fence by day, a thief by night). More neighbors, new zones and public landmarks unlock on a schedule in `server/eras.js`, but only when the economy has earned them.
+
+**Mayor elections.** Every 3 island days the animals elect their mayor. Each one decides for itself whether to run and on what platform: the property tax, the fine a caught thief pays, and whether the treasury funds public works or repays theft victims. A day later every animal votes, with its reason. The winner's platform becomes the island's rules (clamped to fixed limits in `server/election.js`), and a new mayor receives the treasury in an on-chain handover. Candidacies and votes are sealed decision records like every payment.
 
 The **central bank** holds the seed supply, pays for exports, gives a small basic income to anyone who goes broke, and tops every agent up with a little ETH for gas. It never moves an agent's money.
 
@@ -94,6 +96,7 @@ Settings go in `.env` (it's in `.gitignore`). Add `ANTHROPIC_API_KEY=...` to let
 | `server/chain-evm.js` | ERC-20 transfers on Robinhood Chain, with the memo in the transaction data |
 | `server/relations.js` | Trust and rivalry between inhabitants |
 | `server/daily.js` | The Insula Daily |
+| `server/election.js` | Mayor elections: campaigns, votes, the count and the treasury handover |
 | `server/index.js` | Runs the sim, saves and restores it, streams it to the browser, and serves the leaderboard |
 | `web/` | The 3D viewer, feeds, dashboard and profiles, plus the Verify page and the Leaderboard |
 

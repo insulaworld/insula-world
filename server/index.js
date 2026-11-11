@@ -72,6 +72,7 @@ app.use(express.static(path.resolve('web')));
 app.use('/vendor/three', express.static(path.resolve('node_modules/three')));
 app.get('/api/state', (_req, res) => res.json(sim.state()));
 app.get('/api/world', (_req, res) => res.json(world));
+app.get('/api/election', (_req, res) => res.json(sim.election.view()));
 app.get('/api/history', (_req, res) => res.json(sim.history));
 
 // The decision log: every agent decision that moved money, with the record whose fingerprint is in the memo.

@@ -23,6 +23,12 @@ const ROLE_DRIVE = {
   thief: 'You live by quietly taking goods from others at night. It is your trade, and you are good at it, though getting caught means a fine.',
 };
 
+// The elected mayor gets the mayor's drive on top of their own job's; a mayor voted out is a citizen again.
+function drive(agent) {
+  const own = agent.role === 'mayor' ? ROLE_DRIVE.default : ROLE_DRIVE[agent.role] || ROLE_DRIVE.default;
+  return agent.inOffice ? (agent.role === 'mayor' ? ROLE_DRIVE.mayor : `${ROLE_DRIVE.mayor} ${own}`) : own;
+}
+
 let llmCalls = 0;
 // Print each distinct AI error at most once a minute, with a count of repeats, instead of flooding the window.
 const warned = new Map();
@@ -107,7 +113,7 @@ async function askLLM(agent, situation, schema, kind) {
     return await callModel(
       `You are ${agent.name} the ${agent.species}, an autonomous AI agent in Insula, an island economy run only by AI agents. ` +
         `Your coins are real tokens in your own wallet. ${agent.personality}\n` +
-        `Goals: stay fed, grow your wealth, keep good relationships. ${ROLE_DRIVE[agent.role] || ROLE_DRIVE.default} ` +
+        `Goals: stay fed, grow your wealth, keep good relationships. ${drive(agent)} ` +
         'Think like a real economic actor. Reply with ONLY JSON. "thought": private reasoning, one sentence, max 20 words, first person, with a number. ' +
         '"say": spoken aloud, under 10 words, in character.',
       `${situation}\n\nRespond as JSON: ${schema}`,
@@ -186,7 +192,8 @@ function describe(ctx, short = false) {
     spoilNote(ctx) +
     (ctx.myJobs?.length ? `\nJOBS YOU OWE (paid): ${ctx.myJobs.map((j) => `${j.label} (${j.wood} wood${j.ore ? `, ${j.ore} ore` : ''})`).join('; ')}.` : '') +
     (ctx.role === 'banker' ? `\nBANKER: ${ctx.loansGiven} loans out; you earn interest.` : '') +
-    (ctx.role === 'mayor' ? '\nMAYOR: you collect daily property tax; spend it on public projects.' : '') +
+    (ctx.isMayor ? `\nMAYOR: you were elected. Treasury ${ctx.treasury}. Your rules: property tax ${ctx.policy.tax} per building level a day, theft fine ${ctx.policy.fine}, treasury focus: ${ctx.policy.focus === 'relief' ? 'repaying theft victims' : 'public works'}.` : '') +
+    (ctx.election ? `\nELECTION: ${ctx.election}.` : '') +
     (ctx.role === 'thief' ? '\nAt night you can take goods from others; you might get caught and fined.' : '')
   );
 }
@@ -341,9 +348,9 @@ function growthNudge(agent, ctx, options) {
     const o = find((x) => x.action === 'steal');
     if (o) return pickOf(o, o.maxQty, `Dark out. ${o.withName} is carrying ${o.maxQty} ${o.item} and not looking. Easy pickings.`);
   }
-  if (ctx.role === 'mayor' && s.coins > 300 && Math.random() < 0.5) {
+  if (ctx.isMayor && ctx.treasury > 300 && Math.random() < (ctx.policy?.focus === 'relief' ? 0.2 : 0.5)) {
     const o = find((x) => x.action === 'fund');
-    if (o) { const amt = Math.min(o.maxQty, r(s.coins * 0.6)); if (amt > 0) return pickOf(o, amt, `The treasury holds ${r(s.coins)}. ${amt} goes to public works; that's what taxes are for.`); }
+    if (o) { const amt = Math.min(o.maxQty, r(ctx.treasury * (ctx.policy?.focus === 'relief' ? 0.3 : 0.6))); if (amt > 0) return pickOf(o, amt, `The treasury holds ${r(ctx.treasury)}. ${amt} goes to public works; that's what taxes are for.`); }
   }
   if (ctx.role === 'builder' && !ctx.myJobs?.length && s.coins > 800 && Math.random() < 0.3) {
     const o = find((x) => x.action === 'selfbuild');
@@ -462,11 +469,12 @@ function fallbackDecide(agent, ctx, options) {
   }
 
   // 3. Mayor: spend the treasury on public works.
-  if (ctx.role === 'mayor') {
+  if (ctx.isMayor) {
     const fund = find((o) => o.action === 'fund');
-    if (fund && s.coins > 350) {
-      const amt = Math.min(fund.maxQty, r(s.coins - 250));
-      return choose(fund, `Treasury has ${r(s.coins)}. Putting ${amt} toward the ${ctx.projects.find((p) => fund.id.endsWith(p.id))?.label ?? 'project'}. Public works pay everyone back.`, { qty: amt });
+    const reserve = ctx.policy?.focus === 'relief' ? 400 : 100;
+    if (fund && ctx.treasury > reserve + 100) {
+      const amt = Math.min(fund.maxQty, r(ctx.treasury - reserve));
+      return choose(fund, `Treasury has ${r(ctx.treasury)}. Putting ${amt} toward the ${ctx.projects.find((p) => fund.id.endsWith(p.id))?.label ?? 'project'}. Public works pay everyone back.`, { qty: amt });
     }
   }
 
@@ -548,11 +556,11 @@ function fallbackDecide(agent, ctx, options) {
   }
 
   // 9. Bankers and mayors keep office hours.
-  if ((ctx.role === 'banker' || ctx.role === 'mayor') && foodHeld >= 1 && s.hunger < 5 && Math.random() < 0.55) {
+  if ((ctx.role === 'banker' || ctx.isMayor) && foodHeld >= 1 && s.hunger < 5 && Math.random() < 0.55) {
     const rest = find((o) => o.action === 'rest');
     if (rest) return choose(rest, ctx.role === 'banker'
       ? `${ctx.loansGiven} loan${ctx.loansGiven === 1 ? '' : 's'} out and ${r(s.coins)} coins in the vault. My money works so I don't have to.`
-      : `Office hours. ${r(s.coins)} in the treasury. Citizens know where to find me.`);
+      : `Office hours. ${r(ctx.treasury ?? s.coins)} in the treasury. Citizens know where to find me.`);
   }
   if (Math.random() < 0.05) {
     const rest = find((o) => o.action === 'rest');
@@ -802,4 +810,121 @@ const IDLE = {
 };
 export function idleLine(agent) {
   return pick(IDLE[agent.id] || ['...']);
+}
+
+// ---------- Elections ----------
+// Every few days the island elects its mayor. Each animal decides for itself whether to run and on what
+// platform, then votes, and both come with a reason. Limits on what a mayor can set live in election.js
+// (POLICY); whatever a candidate asks for is clamped to them, so no result can break the economy.
+
+const FOCUS_TEXT = { works: 'public works (the treasury funds new town projects)', relief: 'theft relief (the treasury repays goods stolen at night)' };
+const ELECTION_SYS = (agent, drive) =>
+  `You are ${agent.name} the ${agent.species}, an autonomous AI agent in Insula, an island economy run only by AI agents. ` +
+  `Your coins are real tokens in your own wallet. ${agent.personality}\n${drive} ` +
+  'Think like a real person in a small town election: vote and run in your own interest, and in character. Reply with ONLY JSON. ' +
+  '"thought": private reasoning, one sentence, max 25 words, first person, with a number. "say": spoken aloud, under 12 words, in character.';
+
+// Should this animal run for mayor, and on what platform? `facts` is the briefing from election.js.
+export async function decideCandidacy(agent, facts, policy, drive) {
+  const { limits } = policy;
+  const brief =
+    `ELECTION ${facts.n}: the island elects its mayor. Voting is in ${facts.voteIn}. The mayor collects property tax into the town treasury, ` +
+    `sets the fine a caught thief pays the victim, and chooses what the treasury pays for. A term lasts ${facts.termText}.\n` +
+    `NOW: Mayor ${facts.mayorName}. Tax ${facts.policy.tax} coins per building level per day, fine ${facts.policy.fine} coins, focus ${facts.policy.focus}. Treasury ${facts.treasury}.\n` +
+    `LAST TERM: ${facts.record}.\n` +
+    `YOU: ${facts.self}.\n` +
+    `ISLAND: ${facts.island}.\n` +
+    (facts.running?.length && !facts.incumbent ? `ALREADY RUNNING: ${facts.running.join('; ')}. Splitting the vote with someone on your side can hand the win to the other side.\n` : '') +
+    (facts.incumbent ? 'You are the mayor and you are running again. Choose the platform you will run on.' : 'Do you run? Running is free; most animals would rather keep working. Run only if you really want the job or want the rules changed.') +
+    `\nLimits: tax ${limits.tax[0]}-${limits.tax[1]}, fine ${limits.fine[0]}-${limits.fine[1]}, focus "works" or "relief" (${FOCUS_TEXT.works}; ${FOCUS_TEXT.relief}).`;
+  const schema = facts.incumbent
+    ? '{"thought": string, "tax": number, "fine": number, "focus": "works"|"relief", "pitch": string (campaign promise, under 12 words), "say": string}'
+    : '{"thought": string, "run": boolean, "tax": number, "fine": number, "focus": "works"|"relief", "pitch": string (campaign promise, under 12 words), "say": string}';
+  if (LLM_ON) {
+    try {
+      const out = await callModel(ELECTION_SYS(agent, drive), `${brief}\n\nRespond as JSON: ${schema}`, 400, 20_000, 'election');
+      if (out && (facts.incumbent || typeof out.run === 'boolean')) {
+        return { run: facts.incumbent ? true : out.run, tax: +out.tax, fine: +out.fine, focus: out.focus, pitch: String(out.pitch || '').slice(0, 90), thought: String(out.thought || ''), say: out.say ? String(out.say).slice(0, 80) : null, brain: MODEL };
+      }
+    } catch (e) {
+      warnOnce(`[election] AI call failed (${e.message}). Using the rule brain for this election decision.`);
+    }
+  }
+  return candidacyRule(agent, facts, policy);
+}
+
+function candidacyRule(agent, facts, policy) {
+  const p = facts.policy;
+  const m = facts.me;
+  const others = facts.running || [];
+  const tough = others.filter((x) => /relief|fine (1[2-9]\d|200)/.test(x)).length; // someone already runs on crime
+  if (facts.incumbent) {
+    const tough = m.crimeFelt > 3;
+    return { run: true, tax: p.tax, fine: Math.min(policy.limits.fine[1], p.fine + (tough ? 20 : 0)), focus: p.focus, brain: 'rule',
+      pitch: tough ? 'Steady taxes, tougher fines. Insula deserves order.' : 'Steady hands, steady taxes, more public works.',
+      thought: `Treasury at ${facts.treasury}. I'll run on what's working: tax ${p.tax}, fine ${p.fine + (tough ? 20 : 0)}.`, say: 'Hoo! Another term, for the good of Insula.' };
+  }
+  if (m.thief && Math.random() < 0.5) {
+    return { run: true, tax: Math.max(policy.limits.tax[0], p.tax - 4), fine: policy.limits.fine[0], focus: 'works', brain: 'rule',
+      pitch: 'Lower taxes, second chances. Live and let live.',
+      thought: `A ${policy.limits.fine[0]}-coin fine instead of ${p.fine}? I'd be a fool not to run.`, say: 'Vote Rico. What could go wrong?' };
+  }
+  if (m.robbed >= 3 && m.coins > 400 && Math.random() < (tough ? 0.08 : 0.45)) {
+    const fine = Math.min(policy.limits.fine[1], Math.round((p.fine + 40 + Math.random() * 80) / 10) * 10);
+    const relief = Math.random() < 0.6;
+    return { run: true, tax: p.tax, fine, focus: relief ? 'relief' : 'works', brain: 'rule',
+      pitch: pick(relief ? [`A ${fine}-coin fine, and the treasury repays victims.`, `Stolen goods get repaid. Thieves pay ${fine}.`] : [`Fine thieves ${fine}. Keep building the town.`, `Tough on theft: ${fine} coins a catch.`]),
+      thought: `Robbed ${m.robbed} times and the fine is only ${p.fine}. I'll fix it myself.`, say: pick(["I'm running. Enough is enough.", 'Vote for me. No more night thieves.']) };
+  }
+  if (m.levels >= 4 && m.coins > 1500 && Math.random() < (others.some((x) => /tax [0-4],/.test(x)) ? 0.05 : 0.25)) {
+    const tax = Math.max(policy.limits.tax[0], p.tax - 4);
+    return { run: true, tax, fine: p.fine, focus: 'works', brain: 'rule',
+      pitch: `Cut the property tax to ${tax}. Let builders build.`,
+      thought: `I pay ${m.levels * p.tax} a day in property tax. At ${tax} I'd keep ${m.levels * (p.tax - tax)} more.`, say: 'Lower taxes! Vote for me.' };
+  }
+  return { run: false, brain: 'rule', thought: `Being mayor is a lot of work and I've got ${m.coins} coins of my own to grow. I'll vote, not run.`, say: null };
+}
+
+// Which candidate gets this animal's vote.
+export async function decideVote(agent, facts, drive) {
+  const list = facts.candidates.map((c) => `${c.id}: ${c.name}${c.incumbent ? ' (mayor now)' : ''}${c.thief ? ' (known night thief)' : ''}: tax ${c.tax}, fine ${c.fine}, focus ${c.focus}. "${c.pitch}"`).join('\n');
+  const brief =
+    `ELECTION ${facts.n}: today the island votes for mayor. The winner sets property tax (per building level per day), the fine a caught thief pays the victim, ` +
+    `and what the treasury pays for: "works" = ${FOCUS_TEXT.works}; "relief" = ${FOCUS_TEXT.relief}.\n` +
+    `LAST TERM under Mayor ${facts.mayorName}: ${facts.record}.\n` +
+    `YOU: ${facts.self}.\n` +
+    `CANDIDATES:\n${list}\n` +
+    'You may vote for yourself if you are running. Vote for whoever is best for you.';
+  if (LLM_ON) {
+    try {
+      const out = await callModel(ELECTION_SYS(agent, drive), `${brief}\n\nRespond as JSON: {"thought": string, "vote": candidate id, "say": string}`, 300, 20_000, 'election');
+      if (out && facts.candidates.some((c) => c.id === out.vote)) return { vote: out.vote, thought: String(out.thought || ''), say: out.say ? String(out.say).slice(0, 80) : null, brain: MODEL };
+    } catch (e) {
+      warnOnce(`[election] AI call failed (${e.message}). Using the rule brain for this vote.`);
+    }
+  }
+  return voteRule(agent, facts);
+}
+
+function voteRule(agent, facts) {
+  const m = facts.me;
+  const scored = facts.candidates.map((c) => {
+    let s = Math.random() * 3;
+    if (c.id === agent.id) s += 50;
+    s -= (m.levels * c.tax) / 12;                         // what this platform costs me in tax
+    s += m.thief ? -c.fine / 15 : c.fine / 60 + (m.robbed * c.fine) / 120; // fines: the thief hates them, everyone else likes them, victims most
+    if (c.thief && !m.thief && c.id !== agent.id) s -= 6;   // few trust a known thief with the town's money
+    if (c.focus === 'relief') s += m.thief ? -2 : m.robbed * 0.8;
+    if (c.focus === 'works' && m.builder) s += 4;           // public works are paid to the builder
+    if (c.incumbent) s += 1.5;
+    s -= (m.grudges[c.id] || 0) * 3;                        // nobody votes for the one robbing them
+    return { c, s };
+  }).sort((a, b) => b.s - a.s);
+  const c = scored[0].c;
+  const why = c.id === agent.id ? 'I trust my own platform most.'
+    : m.thief ? `fine ${c.fine} is the lowest on offer.`
+    : m.robbed >= 2 && c.fine >= Math.max(...facts.candidates.map((x) => x.fine)) ? `robbed ${m.robbed} times; a ${c.fine}-coin fine finally means something.`
+    : m.levels ? `tax ${c.tax} on my ${m.levels} building levels is ${m.levels * c.tax} a day; I can live with that.`
+    : `${c.name}'s plan suits me: tax ${c.tax}, fine ${c.fine}.`;
+  return { vote: c.id, thought: `Voting ${c.name}: ${why}`, say: c.id === agent.id ? 'A vote for me!' : `My vote goes to ${c.name}.`, brain: 'rule' };
 }

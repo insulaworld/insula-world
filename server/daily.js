@@ -27,7 +27,7 @@ function fresh(sim, day) {
     trades: 0, volume: 0,
     exports: { qty: 0, coins: 0 }, imports: { qty: 0, coins: 0 },
     goods: {},
-    loans: [], repays: 0, defaults: [], contracts: [], donations: [], taxes: 0, fines: [],
+    loans: [], repays: 0, defaults: [], contracts: [], donations: [], taxes: 0, fines: [], relief: 0, candidates: [], elections: [],
     thefts: [], built: [], landmarks: [], eras: [], arrivals: [], basicIncome: [],
     biggest: null,
     quotes: [],
@@ -70,6 +70,7 @@ export class Reporter {
         case 'donation': a.donations.push({ who: e.from, amount: amt, text: e.text }); break;
         case 'tax': a.taxes += amt; break;
         case 'fine': a.fines.push({ thief: e.from, victim: e.to, amount: amt }); break;
+        case 'relief': a.relief = (a.relief || 0) + amt; break;
         case 'income': if (/basic income/.test(e.text || '')) a.basicIncome.push(e.to); break;
         default:
           if (ITEMS.includes(e.kind)) {
@@ -77,14 +78,17 @@ export class Reporter {
             g.qty += e.qty || 0; g.coins += amt; g.deals++;
           }
       }
-      if (!['income', 'tax', 'fine'].includes(e.kind)) {
+      if (!['income', 'tax', 'fine', 'relief', 'treasury'].includes(e.kind)) {
         a.trades++;
         a.volume += amt;
         if (!a.biggest || amt > a.biggest.amount) a.biggest = { amount: amt, text: e.text, kind: e.kind, from: e.from, to: e.to };
       }
     } else if (e.type === 'story') {
       if (e.kind === 'theft') a.thefts.push({ thief: e.thief, victim: e.victim, item: e.item, n: e.n, caught: e.caught });
+      if (e.kind === 'election') (a.elections ||= []).push({ n: e.n, winner: e.winner, prev: e.prev, changed: e.changed, tally: e.tally, policy: e.policy });
       if (e.kind === 'built') a.built.push({ owner: e.owner, builder: e.builder, btype: e.btype, level: e.level });
+    } else if (e.type === 'election' && e.kind === 'candidate') {
+      (a.candidates ||= []).push({ n: e.n, id: e.candidate.id, tax: e.candidate.tax, fine: e.candidate.fine, focus: e.candidate.focus, pitch: e.candidate.pitch, incumbent: e.candidate.incumbent });
     } else if (e.type === 'world' && e.kind === 'landmark') {
       a.landmarks.push(e.project);
     } else if (e.type === 'era') {
@@ -181,6 +185,19 @@ export class Reporter {
     for (const r of acc.arrivals.filter((r) => !covered.has(r.id))) {
       add(85, 'New in town', `${r.name} the ${cap(r.species)} moves to Insula`, `A new ${r.job} stepped off the boat with a wallet of their own and a welcome grant from the bank. Insula now has ${plural(Object.keys(sim.agents).length, 'resident')}.`);
     }
+    const an = (x) => (/^(8|11|18)/.test(String(x)) ? 'an' : 'a');
+    const rules = (p) => `property tax ${p.tax} per building level, ${an(p.fine)} ${p.fine}-coin fine for theft, and a treasury that ${p.focus === 'relief' ? 'repays theft victims' : 'funds public works'}`;
+    for (const el of acc.elections || []) {
+      const score = Object.entries(el.tally).sort((x, y) => y[1] - x[1]).map(([id, v]) => `${n(id)} ${v}`).join(', ');
+      add(el.changed ? 110 : 90, 'Election', el.changed ? `${n(el.winner)} unseats ${n(el.prev)} as mayor` : `Mayor ${n(el.winner)} re-elected`,
+        `Every resident voted, and every vote came with a reason anyone can check. Final count: ${score}. The new rules: ${rules(el.policy)}.`);
+    }
+    const running = (acc.candidates || []).filter((c) => !(acc.elections || []).some((el) => el.n === c.n));
+    if (running.length) {
+      const list = running.map((c) => `${n(c.id)}${c.incumbent ? ' (the mayor)' : ''} on tax ${c.tax} and fine ${c.fine}: "${c.pitch}"`).join('; ');
+      add(running.length > 1 ? 88 : 60, 'Election', running.length > 1 ? `${running.length} animals run for mayor` : `${n(running[0].id)} runs unopposed`, `The campaign is on. ${list}. Voting is tomorrow.`);
+    }
+    if (acc.relief > 0) add(42, 'Town hall', `Treasury repays ${fmt(acc.relief)} coins to theft victims`, 'Under the mayor\'s relief policy, goods stolen in the night are paid back from the town treasury.');
     const caught = acc.thefts.filter((t) => t.caught);
     const away = acc.thefts.filter((t) => !t.caught);
     if (caught.length) {
@@ -212,13 +229,16 @@ export class Reporter {
       const top = acc.donations.slice().sort((x, y) => y.amount - x.amount)[0];
       add(44, 'Public works', `Residents give ${fmt(donated)} coins to public projects`, `The biggest gift came from ${n(top.who)}: ${top.text}.`);
     }
-    if (movers[0] && movers[0].delta >= 200) {
-      const m = movers[0];
+    // A treasury handover isn't anyone's good or bad day: leave both mayors out of the money stories.
+    const handed = new Set((acc.elections || []).filter((el) => el.changed).flatMap((el) => [el.winner, el.prev]));
+    const top = movers.find((m) => !handed.has(m.id));
+    if (top && top.delta >= 200) {
+      const m = top;
       add(Math.min(62, 40 + m.delta / 100), 'Money', `${m.name} up ${fmt(m.delta)} coins`, `${m.name} ended the day with ${fmt(m.coins)} coins, the best day on the island.${richest && richest[0] === m.id ? ` That keeps ${m.name} the richest agent in Insula.` : ''}`);
     }
     // Paying a builder isn't a rough day, it's a purchase (the construction story covers it).
     const clients = new Set(acc.contracts.map((c) => c.client));
-    const loser = movers.filter((m) => !clients.has(m.id)).pop();
+    const loser = movers.filter((m) => !clients.has(m.id) && !handed.has(m.id)).pop();
     if (loser && loser.delta <= -200) {
       add(Math.min(54, 36 + -loser.delta / 100), 'Money', `A rough day for ${loser.name}`, `${loser.name} is down ${fmt(-loser.delta)} coins, closing at ${fmt(loser.coins)}.`);
     }

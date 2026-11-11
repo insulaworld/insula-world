@@ -531,3 +531,47 @@ a#verify-link:hover, a#leader-link:hover { border-color: rgba(143, 240, 193, 0.5
 
 /* Laptop widths: keep the top bar on one row. The AI-brains count and film mode show on wide screens. */
 @media (min-width: 901px) and (max-width: 1599px) { #brain, #film { display: none; } }
+/* With the election chip there too: tighter chips, a ♪ for sound, and the LIVE chip makes room (the election chip pulses instead). */
+@media (min-width: 901px) and (max-width: 1599px) {
+  body.has-vote .status .chip { padding: 7px 10px; letter-spacing: 0.1em; }
+  body.has-vote #sound { font-size: 0; padding-inline: 11px; }
+  body.has-vote #sound::before { content: '♪'; font-size: 12px; letter-spacing: 0; opacity: 0.55; }
+  body.has-vote #sound.active::before { opacity: 1; color: var(--mint); }
+  body.has-vote #mode { display: none; }
+}
+
+/* ---- Mayor election ---- */
+body.econ-open .why-panel { z-index: 45; }
+.vote { max-width: 860px; }
+.vote-how { margin: -6px 0 14px; font-size: 13px; line-height: 1.5; color: var(--ink-2); max-width: 64ch; }
+.vote-rules { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0 10px; }
+.vote-rules > div { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.vote-rules .k { font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+.vote-rules b { font-family: var(--display); font-weight: 500; font-size: 20px; line-height: 1.15; }
+.vote-rules .sub { font-size: 11px; color: var(--muted); line-height: 1.3; }
+.vote-record { font-size: 12.5px; color: var(--ink-2); margin: 4px 0 6px; line-height: 1.5; }
+.vote-record a { color: var(--mint); }
+.vote-cands { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; margin: 8px 0 6px; }
+.vote-cand { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.vote-cand.won { border-color: rgba(143, 240, 193, 0.55); box-shadow: 0 0 0 1px rgba(143, 240, 193, 0.2) inset; }
+.vote-who { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.vote-name { background: none; border: 0; padding: 0; color: var(--text); font: 600 15px var(--body); cursor: pointer; }
+.vote-name:hover { color: var(--mint); }
+.vote-who .vote-tag { font-size: 9px; letter-spacing: 0.12em; color: var(--gold); border: 1px solid rgba(245, 198, 107, 0.4); border-radius: 6px; padding: 2px 6px; }
+.vote-who .vote-tag.win { color: var(--mint); border-color: rgba(143, 240, 193, 0.5); }
+.vote-pitch { margin: 0; font-size: 13px; line-height: 1.4; color: var(--ink-2); }
+.vote-plat { margin: 0; font-size: 10px; letter-spacing: 0.1em; color: var(--muted); }
+.vote-bar { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.07); overflow: hidden; }
+.vote-bar i { display: block; height: 100%; background: rgba(255, 255, 255, 0.35); border-radius: 3px; transition: width 0.6s ease; }
+.vote-bar i.lead { background: var(--mint); }
+.vote-n { margin: 0; font-size: 11px; color: var(--ink-2); }
+button.vote-why { align-self: flex-start; margin-top: auto; font-size: 9.5px; letter-spacing: 0.08em; background: none; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px; cursor: pointer; }
+.vote-list { list-style: none; margin: 6px 0 4px; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px 18px; }
+.vote-list li { font-size: 13px; line-height: 1.45; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.vote-thought { flex-basis: 100%; color: var(--muted); font-size: 12px; }
+.vote-list button.vote-why { margin-top: 0; }
+@media (max-width: 600px) {
+  .vote-rules { grid-template-columns: 1fr; }
+  .vote-rules > div { flex-direction: row; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
+  .vote-rules b { font-size: 17px; }
+}
