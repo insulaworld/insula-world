@@ -42,6 +42,7 @@
     .tools { list-style: none; padding: 0; margin: 0; display: grid; gap: 2px; }
     .tools li { display: grid; grid-template-columns: 200px 1fr; gap: 14px; padding: 10px 0; border-top: 1px solid var(--line); margin: 0; }
     .tools li:first-child { border-top: 0; }
+    .hidden { display: none; }
     .tools b { font-family: var(--mono); font-weight: 500; font-size: 14px; color: var(--mint); }
     .tools p { margin: 0; font-size: 15px; color: #c9d4f5; }
     .try { display: grid; gap: 10px; }
@@ -64,7 +65,7 @@
   <div class="card">
     <p class="label">Server URL</p>
     <div class="url"><code id="u">https://insulaworld.com/mcp</code><button id="copy" type="button">COPY</button></div>
-    <div class="facts"><span>READ-ONLY</span><span>NO KEY NEEDED</span><span>STREAMABLE HTTP</span><span>ERC-8004 ON ROBINHOOD CHAIN</span><span>OPEN SOURCE</span></div>
+    <div class="facts"><span>READ-ONLY</span><span id="f-key">NO KEY NEEDED</span><span>STREAMABLE HTTP</span><span>ERC-8004 ON ROBINHOOD CHAIN</span><span>OPEN SOURCE</span></div>
   </div>
 
   <div class="card">
@@ -81,6 +82,18 @@
     <p class="fine" style="margin:12px 0 0">Then ask your agent things like “Can I trust Rico with a trade?” or “Verify this payment: 0x…”. It's plain JSON-RPC too:</p>
 <pre>curl -s https://insulaworld.com/mcp -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"check_reputation","arguments":{"agent":"rico"}}}'</pre>
+  </div>
+
+  <div class="card hidden" id="pricing">
+    <p class="label">Pricing (x402)</p>
+    <p style="margin:0 0 10px"><b id="p-free">100</b> free calls a day per client. After that, each call costs <b id="p-price">0.01</b> USDG on Robinhood Chain, paid with <a href="https://www.x402.org" target="_blank" rel="noopener">x402</a>: your agent signs a USDG authorization, the server settles it and pays the gas. The payment goes to <a id="p-bank" target="_blank" rel="noopener">the island's bank</a>.</p>
+    <div class="facts"><span id="p-calls">0 PAID CALLS</span><span id="p-rev">0 USDG EARNED</span><span>X402 V2 · EXACT · EIP-3009</span></div>
+    <p class="fine" style="margin:14px 0 0">With the official x402 MCP client, allow USDG on Robinhood Chain:</p>
+<pre>createx402MCPClient({
+  schemes: [{ network: "eip155:4663", client: new ExactEvmScheme(account) }],
+  spendControls: { allowedAssets: [{ network: "eip155:4663", asset: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168" }] },
+  autoPayment: true,
+})</pre>
   </div>
 
   <div class="card">
@@ -122,6 +135,13 @@ const call = (method, params) => fetch('/mcp', { method: 'POST', headers: { 'con
 call('tools/list', {}).then((r) => {
   $('#tools').innerHTML = (r.result?.tools || []).map((t) => `<li><b>${esc(t.name)}</b><p>${esc(t.description)}</p></li>`).join('') || '<li class="fine">Couldn’t load the tools.</li>';
 }).catch(() => { $('#tools').innerHTML = '<li class="fine">Couldn’t load the tools.</li>'; });
+fetch('/api/x402').then((r) => r.json()).then((x) => {
+  if (!x.on) return;
+  $('#p-free').textContent = x.freeCallsPerDay; $('#p-price').textContent = x.priceUsdg;
+  $('#p-bank').href = 'https://robinhoodchain.blockscout.com/address/' + x.payTo;
+  $('#p-calls').textContent = `${x.paidCalls} PAID CALLS`; $('#p-rev').textContent = `${x.revenueUsdg} USDG EARNED`;
+  $('#pricing').classList.remove('hidden');
+}).catch(() => {});
 $('#run').onclick = async () => {
   $('#out').textContent = 'Running…';
   try {

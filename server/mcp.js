@@ -31,7 +31,11 @@ const verdict = (score, count) => {
 };
 
 export function mountMcp(app, ctx) {
-  const { sim, reputation, validation, identity, relations, leaderboard, findDecision } = ctx;
+  const { sim, reputation, validation, identity, relations, leaderboard, findDecision, x402 } = ctx;
+  const paid = () => !!x402?.on();
+  const instructions = () => INSTRUCTIONS + (paid()
+    ? `\nPricing: ${x402.freePerDay} free calls a day per client; after that each tool call costs ${x402.priceText} USDG on Robinhood Chain, paid with x402 (v2, scheme "exact", EIP-3009). The payment goes to the island's bank.`
+    : '\nFree to use.');
 
   function findAgent(q) {
     if (q == null) return null;
@@ -252,7 +256,7 @@ export function mountMcp(app, ctx) {
   const BY_NAME = Object.fromEntries(TOOLS.map((t) => [t.name, t]));
 
   // ---------- JSON-RPC ----------
-  async function handle(msg) {
+  async function handle(msg, client = 'anon') {
     const isReq = msg && msg.id !== undefined && msg.id !== null;
     const ok = (result) => ({ jsonrpc: '2.0', id: msg.id, result });
     const err = (code, message) => ({ jsonrpc: '2.0', id: isReq ? msg.id : null, error: { code, message } });
@@ -265,7 +269,7 @@ export function mountMcp(app, ctx) {
           protocolVersion: PROTOCOLS.includes(asked) ? asked : PROTOCOLS[0],
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: 'insula-world', title: 'Insula World', version: '1.0.0', websiteUrl: BASE() },
-          instructions: INSTRUCTIONS,
+          instructions: instructions(),
         });
       }
       case 'ping': return ok({});
@@ -273,9 +277,26 @@ export function mountMcp(app, ctx) {
       case 'tools/call': {
         const t = BY_NAME[msg.params?.name];
         if (!t) return err(-32602, `Unknown tool: ${msg.params?.name}`);
+        // x402: a call with a payment attached is paid for (verified first, settled after the tool runs);
+        // otherwise it uses the client's free daily allowance, and past that the payment terms come back.
+        const payment = msg.params?._meta?.['x402/payment'];
+        let verified = null;
+        if (paid()) {
+          if (payment) {
+            verified = await x402.verify(payment);
+            if (!verified.ok) return ok(x402.required(t.name, t.description, verified.error));
+          } else if (x402.freeLeft(client) > 0) x402.useFree(client);
+          else return ok(x402.required(t.name, t.description));
+        }
         try {
           const out = await t.run(msg.params?.arguments || {});
-          return ok({ content: [{ type: 'text', text: JSON.stringify(out, null, 1) }], structuredContent: out, isError: false });
+          const result = { content: [{ type: 'text', text: JSON.stringify(out, null, 1) }], structuredContent: out, isError: false };
+          if (verified) {
+            // Settle before handing over the result; if settlement fails, the result is withheld.
+            try { result._meta = { 'x402/payment-response': await x402.settle(verified) }; }
+            catch (e) { console.error('[x402] settle', e.message); return ok(x402.required(t.name, t.description, `Settlement failed: ${String(e.shortMessage || e.message).slice(0, 200)}`)); }
+          } else if (paid()) result._meta = { 'insula/free-calls-left-today': x402.freeLeft(client) };
+          return ok(result);
         } catch (e) {
           const text = e instanceof ToolError ? e.message : `Something went wrong: ${e.message}`;
           if (!(e instanceof ToolError)) console.error('[mcp]', msg.params?.name, e);
@@ -316,17 +337,21 @@ export function mountMcp(app, ctx) {
   app.delete('/mcp', (_req, res) => { cors(res); res.set('Allow', 'POST, OPTIONS').sendStatus(405); });
   app.post('/mcp', expressJson(), async (req, res) => {
     cors(res);
-    if (limited(req.ip)) return res.status(429).json({ jsonrpc: '2.0', id: null, error: { code: -32000, message: 'Too many requests: 120 a minute per client.' } });
+    const client = req.get('fly-client-ip') || req.ip; // Fly passes the visitor's address; req.ip is Fly's proxy
+    if (limited(client)) return res.status(429).json({ jsonrpc: '2.0', id: null, error: { code: -32000, message: 'Too many requests: 120 a minute per client.' } });
     const body = req.body;
     if (body === undefined || body === null || typeof body !== 'object') return res.status(400).json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error: send a JSON-RPC message.' } });
     const batch = Array.isArray(body);
     if (batch && body.length > 20) return res.status(400).json({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Batches are limited to 20 messages.' } });
-    const replies = (await Promise.all((batch ? body : [body]).map(handle))).filter(Boolean);
+    const replies = (await Promise.all((batch ? body : [body]).map((m) => handle(m, client)))).filter(Boolean);
     if (!replies.length) return res.sendStatus(202);
     const v = req.get('mcp-protocol-version');
     if (v && PROTOCOLS.includes(v)) res.set('Mcp-Protocol-Version', v);
     res.json(batch ? replies : replies[0]);
   });
+
+  // Pricing and what paid calls have earned so far (every payment is a USDG transfer on-chain).
+  app.get('/api/x402', (_req, res) => { cors(res); res.json(x402 ? x402.view() : { on: false }); });
 
   return { tools: TOOLS.map((t) => t.name) };
 }

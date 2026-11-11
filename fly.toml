@@ -13,6 +13,10 @@ primary_region = "iad"
   ERC8004_REPUTATION_HISTORY = "on"
   # Insula's own ERC-8004 agent (owned by the dev wallet; asks Hey Research to validate what Insula ships).
   ERC8004_PROJECT_AGENT_ID = "25434"
+  # x402: paid MCP calls past the free allowance, in USDG on Robinhood Chain, paid to the island's bank.
+  X402_PAY_TO = "0x449D88802D7EDA208F02a8026762da4fbe1a5c7c"
+  X402_PRICE_USDG = "0.01"
+  X402_FREE_PER_DAY = "100"
 
 [[mounts]]
   source = "insula_data"

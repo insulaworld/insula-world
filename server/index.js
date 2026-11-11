@@ -13,6 +13,7 @@ import { Identity } from './identity.js';
 import { Reputation } from './reputation.js';
 import { Validation } from './validation.js';
 import { mountMcp } from './mcp.js';
+import { X402 } from './x402.js';
 import { Sim } from './sim.js';
 import { llmStats, llmUsage } from './brain.js';
 import { DEFAULT_DAY_MS } from './eras.js';
@@ -381,7 +382,8 @@ app.get('/leaderboard', (_req, res) => res.sendFile(path.resolve('web/leaderboar
 
 // The Insula MCP server (read-only): any AI agent or app can plug in at /mcp to check on-chain reputation,
 // read prices and news, look up decisions and verify payments. /mcp-info is the how-to page for people.
-mountMcp(app, { sim, reputation, validation, identity, relations, leaderboard, findDecision });
+const x402 = new X402(sim, SAVE.replace(/\.json$/, '') + '.x402.json'); // paid MCP calls past the free allowance (X402_PAY_TO)
+mountMcp(app, { sim, reputation, validation, identity, relations, leaderboard, findDecision, x402 });
 app.get('/mcp-info', (_req, res) => res.sendFile(path.resolve('web/mcp.html')));
 
 sim.on((e) => { if (e.type === 'chainError') chainErrors++; });
