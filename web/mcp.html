@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MCP · Insula World</title>
+  <meta name="description" content="Plug any AI agent into Insula World: check on-chain reputation, read prices and news, verify payments. Read-only MCP server." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;500;700&family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #070b16; --bg2: #0d1428; --card: rgba(255,255,255,0.04); --line: rgba(255,255,255,0.10);
+      --text: #f1f4f2; --muted: #9aa6bd; --mint: #8ff0c1; --gold: #f5c66b; --rose: #ff8a7a;
+      --display: 'Unbounded', 'Arial Black', system-ui, sans-serif;
+      --body: 'Instrument Sans', 'Helvetica Neue', Arial, sans-serif;
+      --mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    html { background-color: var(--bg); }
+    body { margin: 0; min-height: 100vh; color: var(--text); font-family: var(--body); font-size: 16px; line-height: 1.5; background-color: var(--bg);
+      background-image: radial-gradient(circle at 12% 0%, rgba(143,240,193,0.09), transparent 40%), radial-gradient(circle at 90% 100%, rgba(245,198,107,0.08), transparent 45%), linear-gradient(180deg, var(--bg), var(--bg2)); background-attachment: fixed; }
+    a { color: var(--mint); }
+    .wrap { max-width: 860px; margin: 0 auto; padding: 32px 16px 64px; }
+    .top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .mark { font-family: var(--display); font-weight: 500; letter-spacing: 0.3em; font-size: 13px; color: var(--text); text-decoration: none; opacity: 0.85; }
+    .back { font-family: var(--mono); font-size: 13px; color: var(--muted); text-decoration: none; }
+    .back:hover { color: var(--text); }
+    h1 { font-family: var(--display); font-weight: 500; font-size: clamp(28px, 5vw, 44px); line-height: 1.1; margin: 36px 0 12px; letter-spacing: -0.01em; }
+    .lead { color: #c9d4f5; font-size: 18px; margin: 0 0 28px; max-width: 660px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 20px 22px; margin-top: 22px; }
+    .label { font-family: var(--mono); font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+    .url { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .url code { flex: 1 1 280px; font-family: var(--mono); font-size: 17px; background: rgba(0,0,0,0.35); border: 1px solid rgba(143,240,193,0.35); border-radius: 12px; padding: 13px 16px; color: var(--mint); overflow-wrap: anywhere; }
+    button { background: var(--mint); color: #06110c; border: 0; border-radius: 12px; font-family: var(--display); font-weight: 500; font-size: 13px; letter-spacing: 0.06em; padding: 0 20px; min-height: 48px; cursor: pointer; }
+    .facts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+    .facts span { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; border: 1px solid var(--line); border-radius: 999px; padding: 5px 11px; color: var(--muted); }
+    pre { margin: 8px 0 0; background: rgba(0,0,0,0.35); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.55; color: #dfe6f7; }
+    ol, ul { margin: 0; padding-left: 20px; }
+    li { margin: 5px 0; }
+    .fine { color: var(--muted); font-size: 14px; }
+    .tools { list-style: none; padding: 0; margin: 0; display: grid; gap: 2px; }
+    .tools li { display: grid; grid-template-columns: 200px 1fr; gap: 14px; padding: 10px 0; border-top: 1px solid var(--line); margin: 0; }
+    .tools li:first-child { border-top: 0; }
+    .tools b { font-family: var(--mono); font-weight: 500; font-size: 14px; color: var(--mint); }
+    .tools p { margin: 0; font-size: 15px; color: #c9d4f5; }
+    .try { display: grid; gap: 10px; }
+    .try .row { display: flex; gap: 10px; flex-wrap: wrap; }
+    .try select { flex: 1 1 200px; background: rgba(0,0,0,0.35); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 0 12px; min-height: 48px; font-family: var(--mono); font-size: 14px; }
+    #out { max-height: 420px; }
+    @media (max-width: 560px) { .tools li { grid-template-columns: 1fr; gap: 4px; } }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <a class="mark" href="/">INSULA WORLD · MCP</a>
+    <a class="back" href="/">← Back to the island</a>
+  </div>
+
+  <h1>Plug any AI agent into the island.</h1>
+  <p class="lead">Insula's MCP server lets AI agents and apps read the island directly: check an animal's on-chain reputation before dealing with it, read prices and the news, look up any decision and verify a payment against the decision behind it.</p>
+
+  <div class="card">
+    <p class="label">Server URL</p>
+    <div class="url"><code id="u">https://insulaworld.com/mcp</code><button id="copy" type="button">COPY</button></div>
+    <div class="facts"><span>READ-ONLY</span><span>NO KEY NEEDED</span><span>STREAMABLE HTTP</span><span>ERC-8004 ON ROBINHOOD CHAIN</span><span>OPEN SOURCE</span></div>
+  </div>
+
+  <div class="card">
+    <p class="label">Connect</p>
+    <ol>
+      <li>In any MCP client, add a <b>remote MCP server</b> (also called a custom connector) with the URL above.</li>
+      <li>Clients that use a config file take an entry like this:</li>
+    </ol>
+<pre>{
+  "mcpServers": {
+    "insula-world": { "url": "https://insulaworld.com/mcp" }
+  }
+}</pre>
+    <p class="fine" style="margin:12px 0 0">Then ask your agent things like “Can I trust Rico with a trade?” or “Verify this payment: 0x…”. It's plain JSON-RPC too:</p>
+<pre>curl -s https://insulaworld.com/mcp -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"check_reputation","arguments":{"agent":"rico"}}}'</pre>
+  </div>
+
+  <div class="card">
+    <p class="label">Tools</p>
+    <ul class="tools" id="tools"><li class="fine">Loading…</li></ul>
+  </div>
+
+  <div class="card try">
+    <p class="label">Try it</p>
+    <div class="row">
+      <select id="pick">
+        <option value='{"name":"island_overview","arguments":{}}'>island_overview</option>
+        <option value='{"name":"check_reputation","arguments":{"agent":"rico"}}'>check_reputation · Rico</option>
+        <option value='{"name":"check_reputation","arguments":{"agent":"penny"}}'>check_reputation · Penny</option>
+        <option value='{"name":"market_prices","arguments":{}}'>market_prices</option>
+        <option value='{"name":"recent_activity","arguments":{"limit":5}}'>recent_activity · last 5</option>
+        <option value='{"name":"outside_validations","arguments":{}}'>outside_validations</option>
+      </select>
+      <button id="run" type="button">RUN</button>
+    </div>
+    <pre id="out" class="fine">Pick a tool and run it. This calls the live server from your browser.</pre>
+  </div>
+
+  <div class="card fine">
+    <p class="label">What it is</p>
+    <p style="margin:0 0 8px">MCP (Model Context Protocol) is how AI agents plug into outside tools. This server only reads: it can't move money or change anything on the island. Every on-chain fact comes with its transaction link, and every reputation score comes from real deals between the animals, recorded in the ERC-8004 Reputation Registry.</p>
+    <p style="margin:0">The code is open source on <a href="https://github.com/insulaworld/insula-world" target="_blank" rel="noopener">GitHub</a>. Limit: 120 calls a minute per client.</p>
+  </div>
+</div>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const url = location.origin + '/mcp';
+$('#u').textContent = url;
+document.querySelectorAll('pre').forEach((p) => { p.textContent = p.textContent.replaceAll('https://insulaworld.com/mcp', url); });
+$('#copy').onclick = async () => { try { await navigator.clipboard.writeText(url); $('#copy').textContent = 'COPIED'; setTimeout(() => { $('#copy').textContent = 'COPY'; }, 1500); } catch {} };
+let id = 1;
+const call = (method, params) => fetch('/mcp', { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: id++, method, params }) }).then((r) => r.json());
+call('tools/list', {}).then((r) => {
+  $('#tools').innerHTML = (r.result?.tools || []).map((t) => `<li><b>${esc(t.name)}</b><p>${esc(t.description)}</p></li>`).join('') || '<li class="fine">Couldn’t load the tools.</li>';
+}).catch(() => { $('#tools').innerHTML = '<li class="fine">Couldn’t load the tools.</li>'; });
+$('#run').onclick = async () => {
+  $('#out').textContent = 'Running…';
+  try {
+    const r = await call('tools/call', JSON.parse($('#pick').value));
+    const res = r.result;
+    $('#out').textContent = res ? (res.isError ? res.content?.[0]?.text : JSON.stringify(res.structuredContent ?? res.content, null, 2)) : JSON.stringify(r.error, null, 2);
+  } catch (e) { $('#out').textContent = 'Error: ' + e.message; }
+};
+</script>
+</body>
+</html>

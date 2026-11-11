@@ -153,6 +153,7 @@ export class Identity {
         { name: 'verify', endpoint: `${base}/verify` },
         { name: 'agents', endpoint: `${base}/.well-known/agent-registration.json` },
         { name: 'reputation', endpoint: `${base}/api/reputation` },
+        { name: 'MCP', endpoint: `${base}/mcp`, version: '2025-06-18' },
         { name: 'source', endpoint: 'https://github.com/insulaworld/insula-world' },
       ],
       x402Support: false,
