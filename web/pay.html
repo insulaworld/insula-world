@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Insula · Paid MCP call</title>
+<meta name="robots" content="noindex">
+<style>
+  :root { --bg: #0d1117; --panel: #161b22; --line: rgba(255,255,255,.1); --text: #e9ece8; --muted: #8b949e; --mint: #8ff0c1; --gold: #f5c66b; --rose: #ff8a7a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 system-ui, -apple-system, Segoe UI, sans-serif; padding: 32px 16px 80px; }
+  main { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 24px; margin: 0 0 6px; }
+  p.lead { color: var(--muted); margin: 0 0 24px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; margin-bottom: 14px; }
+  h2 { font-size: 15px; margin: 0 0 8px; display: flex; gap: 10px; align-items: center; }
+  h2 .n { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: rgba(255,255,255,.08); font-size: 12px; }
+  h2 .ok { color: var(--mint); font-size: 13px; }
+  code, select, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  button { background: var(--mint); color: #0b1a12; border: 0; border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 14px; cursor: pointer; }
+  button:disabled { opacity: .4; cursor: default; }
+  select { background: #0d1117; color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; width: 100%; margin-bottom: 10px; }
+  .err { color: var(--rose); }
+  a { color: var(--mint); }
+  pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; color: var(--muted); background: #0d1117; border: 1px solid var(--line); border-radius: 8px; padding: 10px; max-height: 320px; overflow: auto; }
+  .big { font-size: 22px; font-weight: 700; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Make a paid MCP call</h1>
+  <p class="lead">Pays 0.01 USDG for one call to Insula's MCP server with x402, the same way an AI agent would. You sign one authorization in your wallet: it lets exactly <span id="price">0.01</span> USDG move to the island's bank, once. The server sends the transaction and pays the gas, so you don't need ETH.</p>
+
+  <section>
+    <h2><span class="n">1</span>Connect a wallet with USDG <span class="ok" id="ok1"></span></h2>
+    <p class="muted">Use a regular wallet account on Robinhood Chain holding at least 0.01 USDG. Smart-account wallets may not work, because USDG checks a plain signature.</p>
+    <button id="connect">Connect wallet</button>
+    <div id="who" class="mono" style="margin-top:8px"></div>
+  </section>
+
+  <section>
+    <h2><span class="n">2</span>Sign and call <span class="ok" id="ok2"></span></h2>
+    <select id="tool">
+      <option value='{"name":"check_reputation","arguments":{"agent":"rico"}}'>check_reputation · Rico</option>
+      <option value='{"name":"check_reputation","arguments":{"agent":"penny"}}'>check_reputation · Penny</option>
+      <option value='{"name":"island_overview","arguments":{}}'>island_overview</option>
+    </select>
+    <button id="pay" disabled>Sign 0.01 USDG and call</button>
+    <div id="status" class="muted" style="margin-top:8px"></div>
+  </section>
+
+  <section id="done" hidden>
+    <h2><span class="n">3</span>Receipt</h2>
+    <div class="big" id="receipt"></div>
+    <p class="muted" id="receipt2"></p>
+    <pre id="out"></pre>
+  </section>
+</main>
+<script src="/vendor/ethers/ethers.umd.min.js"></script>
+<script>
+const CHAIN = { id: 4663, hex: '0x1237', name: 'Robinhood Chain', rpc: 'https://rpc.mainnet.chain.robinhood.com', explorer: 'https://robinhoodchain.blockscout.com' };
+const $ = (id) => document.getElementById(id);
+const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const read = new ethers.JsonRpcProvider(CHAIN.rpc, CHAIN.id, { staticNetwork: true });
+let signer, me, terms;
+let rid = 1;
+const mcp = (method, params) => fetch('/mcp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: rid++, method, params }) }).then((r) => r.json());
+
+async function loadTerms() {
+  const x = await fetch('/api/x402').then((r) => r.json());
+  if (!x.on) throw new Error('Payments are switched off on this server.');
+  terms = { scheme: 'exact', network: x.network, amount: ethers.parseUnits(x.priceUsdg, 6).toString(), asset: x.asset, payTo: x.payTo, maxTimeoutSeconds: 300, extra: { name: 'Global Dollar', version: '1', assetTransferMethod: 'eip3009' } };
+  $('price').textContent = x.priceUsdg;
+  $('pay').textContent = `Sign ${x.priceUsdg} USDG and call`;
+}
+
+$('connect').onclick = async () => {
+  try {
+    if (!window.ethereum) throw new Error('No wallet found in this browser. Open this page in a browser with a wallet extension, or in your wallet app’s browser.');
+    await loadTerms();
+    let provider = new ethers.BrowserProvider(window.ethereum);
+    await provider.send('eth_requestAccounts', []);
+    try { await provider.send('wallet_switchEthereumChain', [{ chainId: CHAIN.hex }]); }
+    catch { await provider.send('wallet_addEthereumChain', [{ chainId: CHAIN.hex, chainName: CHAIN.name, rpcUrls: [CHAIN.rpc], nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, blockExplorerUrls: [CHAIN.explorer] }]); }
+    provider = new ethers.BrowserProvider(window.ethereum);
+    signer = await provider.getSigner(); me = await signer.getAddress();
+    const usdg = new ethers.Contract(terms.asset, ['function balanceOf(address) view returns (uint256)'], read);
+    const bal = await usdg.balanceOf(me);
+    const code = await read.getCode(me);
+    $('who').innerHTML = `${esc(me)}<br>USDG: <b>${ethers.formatUnits(bal, 6)}</b>${code !== '0x' ? '<br><span class="err">This address is a smart account: USDG may reject its signature. A regular account is safer.</span>' : ''}`;
+    if (bal < BigInt(terms.amount)) { $('who').innerHTML += '<br><span class="err">Not enough USDG for one call.</span>'; return; }
+    $('ok1').textContent = '✓ connected'; $('pay').disabled = false;
+  } catch (e) { $('who').innerHTML = `<span class="err">${esc(e.shortMessage || e.message)}</span>`; }
+};
+
+$('pay').onclick = async () => {
+  $('pay').disabled = true;
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const auth = { from: me, to: terms.payTo, value: terms.amount, validAfter: String(now - 600), validBefore: String(now + 300), nonce: ethers.hexlify(ethers.randomBytes(32)) };
+    $('status').textContent = 'Check your wallet: sign the USDG authorization…';
+    const signature = await signer.signTypedData(
+      { name: 'Global Dollar', version: '1', chainId: CHAIN.id, verifyingContract: terms.asset },
+      { TransferWithAuthorization: [{ name: 'from', type: 'address' }, { name: 'to', type: 'address' }, { name: 'value', type: 'uint256' }, { name: 'validAfter', type: 'uint256' }, { name: 'validBefore', type: 'uint256' }, { name: 'nonce', type: 'bytes32' }] },
+      auth);
+    $('status').textContent = 'Signed. The server is checking it, running the tool and settling on Robinhood Chain…';
+    const call = JSON.parse($('tool').value);
+    const r = await mcp('tools/call', { ...call, _meta: { 'x402/payment': { x402Version: 2, resource: { url: `mcp://tool/${call.name}`, mimeType: 'application/json' }, accepted: terms, payload: { signature, authorization: auth } } } });
+    const res = r.result;
+    if (!res || res.isError) throw new Error(res?.structuredContent?.error || res?.content?.[0]?.text || r.error?.message || 'The call failed.');
+    const pr = res._meta?.['x402/payment-response'];
+    $('ok2').textContent = '✓ paid';
+    $('status').textContent = '';
+    $('done').hidden = false;
+    $('receipt').innerHTML = pr ? `Paid ✓ <a href="${CHAIN.explorer}/tx/${esc(pr.transaction)}" target="_blank" rel="noopener">view on Blockscout ↗</a>` : 'Done';
+    $('receipt2').textContent = pr ? `Payer ${pr.payer} · ${pr.network} · tx ${pr.transaction}` : '';
+    $('out').textContent = JSON.stringify(res.structuredContent, null, 2);
+  } catch (e) {
+    $('status').innerHTML = `<span class="err">${esc(e.shortMessage || e.message)}</span>`;
+    $('pay').disabled = false;
+  }
+};
+</script>
+</body>
+</html>

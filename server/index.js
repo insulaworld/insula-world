@@ -173,6 +173,7 @@ app.get('/decisions', (_req, res) => res.redirect('/api/decisions?limit=500'));
 // The Verify page: check any payment on Robinhood Chain against the decision that caused it.
 app.get(['/verify', '/verify/:q'], (_req, res) => res.sendFile(path.resolve('web/verify.html')));
 app.get('/hey', (_req, res) => res.sendFile(path.resolve('web/hey.html'))); // the dev-wallet page for Hey Research validation
+app.get('/pay', (_req, res) => res.sendFile(path.resolve('web/pay.html'))); // make one paid (x402) MCP call from a wallet
 
 // The Insula Daily: one edition per genesis day, plus today's paper so far.
 app.get('/api/daily', (_req, res) => res.json({ editions: sim.daily.index(), latest: sim.daily.latest() }));
