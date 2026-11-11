@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Insula · Hey validation</title>
+<meta name="robots" content="noindex">
+<style>
+  :root { --bg: #0d1117; --panel: #161b22; --line: rgba(255,255,255,.1); --text: #e9ece8; --muted: #8b949e; --mint: #8ff0c1; --gold: #f5c66b; --rose: #ff8a7a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 system-ui, -apple-system, Segoe UI, sans-serif; padding: 32px 16px 80px; }
+  main { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 24px; margin: 0 0 6px; }
+  p.lead { color: var(--muted); margin: 0 0 24px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; margin-bottom: 14px; }
+  h2 { font-size: 15px; margin: 0 0 8px; display: flex; gap: 10px; align-items: center; }
+  h2 .n { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: rgba(255,255,255,.08); font-size: 12px; }
+  h2 .ok { color: var(--mint); font-size: 13px; }
+  code, input, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  button { background: var(--mint); color: #0b1a12; border: 0; border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 14px; cursor: pointer; }
+  button:disabled { opacity: .4; cursor: default; }
+  input { width: 100%; background: #0d1117; color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; }
+  label { display: block; margin: 10px 0 4px; font-size: 12px; color: var(--muted); }
+  .row { display: flex; gap: 10px; }
+  .row > div { flex: 1; }
+  .err { color: var(--rose); }
+  a { color: var(--mint); }
+  #log { white-space: pre-wrap; font-size: 12px; color: var(--muted); margin-top: 10px; }
+  .big { font-size: 40px; font-weight: 700; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Hey Research validation</h1>
+  <p class="lead">Registers Insula's project agent (ERC-8004) from the dev wallet, then asks Hey Research's validator to confirm on-chain what Insula shipped. Your wallet signs everything; nothing here ever sees a key.</p>
+
+  <section>
+    <h2><span class="n">1</span>Connect the dev wallet <span class="ok" id="ok1"></span></h2>
+    <p class="muted">It must be the wallet that verified Insula on HEY (0x0f28…84E1). The page switches your wallet to Robinhood Chain.</p>
+    <button id="connect">Connect wallet</button>
+    <div id="who" class="mono" style="margin-top:8px"></div>
+  </section>
+
+  <section>
+    <h2><span class="n">2</span>Register the Insula World agent <span class="ok" id="ok2"></span></h2>
+    <p class="muted">One transaction: <code>register("https://insulaworld.com/agents/insula.json")</code> on the ERC-8004 identity registry. If this wallet already holds the Insula agent, it's found instead of minting a second one.</p>
+    <button id="register" disabled>Register agent</button>
+    <div id="agent" class="mono" style="margin-top:8px"></div>
+  </section>
+
+  <section>
+    <h2><span class="n">3</span>Ask Hey to validate <span class="ok" id="ok3"></span></h2>
+    <p class="muted">One transaction: <code>validationRequest(Hey's validator, agentId, claim, keccak256(claim))</code> on the ERC-8004 validation registry. The claim must match Hey's format character for character; confirm it with them.</p>
+    <div class="row">
+      <div><label>Window start (UTC)</label><input id="since" type="date" value="2026-10-31"></div>
+      <div><label>Window end (UTC, must be in the past)</label><input id="until" type="date"></div>
+    </div>
+    <label>Claim (requestURI)</label>
+    <input id="claim">
+    <label>requestHash = keccak256(claim)</label>
+    <input id="hash" readonly>
+    <div style="margin-top:12px"><button id="request" disabled>Send validation request</button></div>
+  </section>
+
+  <section>
+    <h2><span class="n">4</span>Hey's answer</h2>
+    <p class="muted">Hey's validator replies on-chain with 100 (shipped in the window) or 0. This checks every 15 seconds.</p>
+    <div id="answer" class="muted">Waiting for a request.</div>
+  </section>
+
+  <div id="log"></div>
+</main>
+<script src="/vendor/ethers/ethers.umd.min.js"></script>
+<script>
+const CHAIN = { id: 4663, hex: '0x1237', name: 'Robinhood Chain', rpc: 'https://rpc.mainnet.chain.robinhood.com', explorer: 'https://robinhoodchain.blockscout.com' };
+const IDENTITY = '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432';
+const VALIDATION = '0x8004Cc8439f36fd5F9F049D9fF86523Df6dAAB58';
+const VALIDATOR = '0xDA0Fa5d2A347425c072b4327A822db7782858fb7';
+const AGENT_URI = 'https://insulaworld.com/agents/insula.json';
+const DEV = { start: '0x0f28', end: '84e1' };
+const TRANSFER = ethers.id('Transfer(address,address,uint256)');
+const ID_ABI = ['function register(string agentURI) returns (uint256)', 'function balanceOf(address) view returns (uint256)', 'function ownerOf(uint256) view returns (address)', 'function tokenURI(uint256) view returns (string)'];
+const VAL_ABI = ['function validationRequest(address validatorAddress, uint256 agentId, string requestURI, bytes32 requestHash)'];
+const RESP = new ethers.Interface(['event ValidationResponse(address indexed validatorAddress, uint256 indexed agentId, bytes32 indexed requestHash, uint8 response, string responseURI, bytes32 responseHash, string tag)']);
+const $ = (id) => document.getElementById(id);
+const log = (t) => { $('log').textContent += t + '\n'; };
+const read = new ethers.JsonRpcProvider(CHAIN.rpc, CHAIN.id, { staticNetwork: true });
+let signer, me, agentId = null;
+
+// The claim, in Hey's format: hey-ship-claim:1:insula-world:<since>:<until> (unix seconds).
+const day = (s) => Math.floor(Date.parse(s + 'T00:00:00Z') / 1000);
+$('until').value = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
+const rehash = () => { $('hash').value = ethers.keccak256(ethers.toUtf8Bytes($('claim').value)); };
+function claim() {
+  if (!$('claim').dataset.touched) $('claim').value = `hey-ship-claim:1:insula-world:${day($('since').value)}:${day($('until').value)}`;
+  rehash();
+}
+$('since').oninput = claim;
+$('until').oninput = claim;
+$('claim').oninput = () => { $('claim').dataset.touched = 1; rehash(); };
+claim();
+
+$('connect').onclick = async () => {
+  try {
+    if (!window.ethereum) throw new Error('No wallet found. Open this page in a browser with your wallet extension.');
+    let provider = new ethers.BrowserProvider(window.ethereum);
+    await provider.send('eth_requestAccounts', []);
+    try { await provider.send('wallet_switchEthereumChain', [{ chainId: CHAIN.hex }]); }
+    catch { await provider.send('wallet_addEthereumChain', [{ chainId: CHAIN.hex, chainName: CHAIN.name, rpcUrls: [CHAIN.rpc], nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, blockExplorerUrls: [CHAIN.explorer] }]); }
+    provider = new ethers.BrowserProvider(window.ethereum);
+    signer = await provider.getSigner();
+    me = await signer.getAddress();
+    const net = await provider.getNetwork();
+    const bal = await read.getBalance(me);
+    const isDev = me.toLowerCase().startsWith(DEV.start) && me.toLowerCase().endsWith(DEV.end);
+    $('who').innerHTML = `${me}<br>network ${net.chainId} · ${ethers.formatEther(bal).slice(0, 10)} ETH`
+      + (isDev ? '' : `<br><span class="err">This isn't the dev wallet that verified Insula on HEY (0x0f28…84E1). Hey won't answer requests from it. Switch accounts in your wallet and reconnect.</span>`);
+    if (Number(net.chainId) !== CHAIN.id) throw new Error('Wallet is not on Robinhood Chain.');
+    if (!isDev) return;
+    $('ok1').textContent = '✓ connected';
+    await findAgent();
+    $('register').disabled = agentId != null;
+    // Already asked for this claim? Show the request as sent and wait for Hey's answer.
+    const sent = await logsBack({ address: VALIDATION, topics: [ethers.id('ValidationRequest(address,uint256,string,bytes32)'), null, null, $('hash').value] }, 2).catch(() => []);
+    if (sent.length) { $('ok3').textContent = '✓ requested'; $('request').disabled = true; watch($('hash').value); }
+  } catch (e) { log('connect: ' + (e.shortMessage || e.message)); }
+};
+
+// The public node only answers log queries spanning under 10M blocks, so look back in chunks.
+async function logsBack(filter, chunks = 12) {
+  let to = await read.getBlockNumber(), out = [];
+  for (let i = 0; i < chunks && to > 0; i++) {
+    const from = Math.max(0, to - 9_000_000);
+    out = (await read.getLogs({ ...filter, fromBlock: from, toBlock: to })).concat(out);
+    if (out.length) break;
+    to = from - 1;
+  }
+  return out;
+}
+
+// Already registered? Find the Insula agent this wallet holds instead of minting another.
+async function findAgent() {
+  const reg = new ethers.Contract(IDENTITY, ID_ABI, read);
+  if ((await reg.balanceOf(me)) === 0n) return;
+  const logs = await logsBack({ address: IDENTITY, topics: [TRANSFER, null, ethers.zeroPadValue(me, 32)] });
+  for (const l of logs.reverse()) {
+    const id = BigInt(l.topics[3]);
+    try { if ((await reg.tokenURI(id)) === AGENT_URI && (await reg.ownerOf(id)).toLowerCase() === me.toLowerCase()) return setAgent(id); } catch {}
+  }
+}
+function setAgent(id) {
+  agentId = id;
+  $('agent').innerHTML = `Insula World is ERC-8004 agent <b>#${id}</b> · <a target="_blank" href="${CHAIN.explorer}/token/${IDENTITY}/instance/${id}">view ↗</a>`;
+  $('ok2').textContent = '✓ registered';
+  $('register').disabled = true;
+  $('request').disabled = false;
+}
+
+$('register').onclick = async () => {
+  try {
+    $('register').disabled = true;
+    log('register: confirm in your wallet…');
+    const tx = await new ethers.Contract(IDENTITY, ID_ABI, signer).register(AGENT_URI);
+    log('register: sent ' + tx.hash);
+    const rc = await tx.wait();
+    const t = rc.logs.find((l) => l.address.toLowerCase() === IDENTITY.toLowerCase() && l.topics[0] === TRANSFER);
+    setAgent(BigInt(t.topics[3]));
+    log(`register: done, agent #${agentId} · ${CHAIN.explorer}/tx/${tx.hash}`);
+  } catch (e) { log('register: ' + (e.shortMessage || e.message)); $('register').disabled = false; }
+};
+
+$('request').onclick = async () => {
+  try {
+    const c = $('claim').value.trim(), parts = c.split(':'), until = Number(parts.at(-1)), since = Number(parts.at(-2));
+    if (!(until < Date.now() / 1000)) throw new Error('The window has to have ended already.');
+    if (!(until > since) || until - since > 400 * 86400) throw new Error('The window must be positive and at most 400 days.');
+    $('request').disabled = true;
+    const hash = ethers.keccak256(ethers.toUtf8Bytes(c));
+    log('request: confirm in your wallet…');
+    const tx = await new ethers.Contract(VALIDATION, VAL_ABI, signer).validationRequest(VALIDATOR, agentId, c, hash);
+    log('request: sent ' + tx.hash);
+    await tx.wait();
+    log(`request: done · ${CHAIN.explorer}/tx/${tx.hash}`);
+    $('ok3').textContent = '✓ requested';
+    watch(hash);
+  } catch (e) { log('request: ' + (e.shortMessage || e.message)); $('request').disabled = false; }
+};
+
+// Wait for Hey's ValidationResponse for this request.
+function watch(hash) {
+  const topic = RESP.getEvent('ValidationResponse').topicHash;
+  const tick = async () => {
+    try {
+      const logs = await logsBack({ address: VALIDATION, topics: [topic, null, null, hash] }, 2);
+      if (logs.length) {
+        const ev = RESP.parseLog(logs.at(-1)).args;
+        const link = /^https?:/.test(ev.responseURI || '') ? ` · <a target="_blank" href="${ev.responseURI}">what Hey counted ↗</a>` : '';
+        $('answer').innerHTML = `<div class="big" style="color:${Number(ev.response) >= 50 ? 'var(--mint)' : 'var(--rose)'}">${ev.response}</div>Hey's validator answered on-chain${ev.tag ? ` (tag “${ev.tag}”)` : ''}${link} · <a target="_blank" href="${CHAIN.explorer}/tx/${logs.at(-1).transactionHash}">tx ↗</a>`;
+        return;
+      }
+      $('answer').textContent = 'Request is on-chain. Waiting for Hey to answer…';
+    } catch (e) { $('answer').textContent = 'Checking… ' + (e.shortMessage || e.message); }
+    setTimeout(tick, 15000);
+  };
+  tick();
+}
+</script>
+</body>
+</html>

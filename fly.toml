@@ -11,6 +11,8 @@ primary_region = "iad"
   ERC8004_REPUTATION = "on"
   # Once: the animals also rate everything they did together since day 1 (runs a single time, then never again).
   ERC8004_REPUTATION_HISTORY = "on"
+  # Insula's own ERC-8004 agent (owned by the dev wallet; asks Hey Research to validate what Insula ships).
+  ERC8004_PROJECT_AGENT_ID = "25434"
 
 [[mounts]]
   source = "insula_data"

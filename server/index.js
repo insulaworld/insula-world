@@ -78,6 +78,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 const app = express();
 app.use(express.static(path.resolve('web')));
 app.use('/vendor/three', express.static(path.resolve('node_modules/three')));
+app.use('/vendor/ethers', express.static(path.resolve('node_modules/ethers/dist')));
 app.get('/api/state', (_req, res) => res.json(sim.state()));
 app.get('/api/world', (_req, res) => res.json(world));
 app.get('/api/election', (_req, res) => res.json(sim.election.view()));
@@ -165,6 +166,7 @@ app.get('/api/decisions', (req, res) => {
 app.get('/decisions', (_req, res) => res.redirect('/api/decisions?limit=500'));
 // The Verify page: check any payment on Robinhood Chain against the decision that caused it.
 app.get(['/verify', '/verify/:q'], (_req, res) => res.sendFile(path.resolve('web/verify.html')));
+app.get('/hey', (_req, res) => res.sendFile(path.resolve('web/hey.html'))); // the dev-wallet page for Hey Research validation
 
 // The Insula Daily: one edition per genesis day, plus today's paper so far.
 app.get('/api/daily', (_req, res) => res.json({ editions: sim.daily.index(), latest: sim.daily.latest() }));

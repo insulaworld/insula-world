@@ -114,6 +114,7 @@ export class Identity {
   // ---------- Public files ----------
   // The registration file each agentURI points at (ERC-8004 "registration-v1").
   registrationFile(id) {
+    if (id === 'insula') return this.projectFile();
     const def = AGENT_DEFS.find((a) => a.id === id);
     if (!def) return null;
     const rec = this.ids[id];
@@ -136,10 +137,38 @@ export class Identity {
     };
   }
 
+  // The project's own agent ("Insula World"), owned by the project's dev wallet rather than by an animal. It's
+  // the agent that asks outside validators (Hey Research) to confirm what Insula ships. Its id is set once it's
+  // registered (ERC8004_PROJECT_AGENT_ID).
+  projectId() { const v = typeof process !== 'undefined' && process.env?.ERC8004_PROJECT_AGENT_ID; return v && /^\d+$/.test(v) ? v : null; }
+  projectFile() {
+    const base = BASE(), pid = this.projectId();
+    return {
+      type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
+      name: 'Insula World',
+      description: 'Insula World is an autonomous AI-agent economy on Robinhood Chain: eight AI animals with their own wallets trade, lend, build, steal and elect a mayor with real $INSULA, with no humans in the loop. They are registered ERC-8004 agents and rate each other in the ERC-8004 reputation registry. This is the project\'s own agent, which asks independent validators to confirm what Insula ships.',
+      image: `${base}/agents/insula.png`,
+      services: [
+        { name: 'web', endpoint: base },
+        { name: 'verify', endpoint: `${base}/verify` },
+        { name: 'agents', endpoint: `${base}/.well-known/agent-registration.json` },
+        { name: 'reputation', endpoint: `${base}/api/reputation` },
+        { name: 'source', endpoint: 'https://github.com/insulaworld/insula-world' },
+      ],
+      x402Support: false,
+      active: true,
+      registrations: pid ? [{ agentId: Number(pid), agentRegistry: this.agentRegistry() }] : [],
+      supportedTrust: ['reputation', 'validation'],
+    };
+  }
+
   // Domain proof: insulaworld.com lists every agent it registered.
   wellKnown() {
     return {
-      registrations: Object.entries(this.ids).map(([, r]) => ({ agentId: Number(r.agentId), agentRegistry: this.agentRegistry() })),
+      registrations: [
+        ...Object.entries(this.ids).map(([, r]) => ({ agentId: Number(r.agentId), agentRegistry: this.agentRegistry() })),
+        ...(this.projectId() ? [{ agentId: Number(this.projectId()), agentRegistry: this.agentRegistry() }] : []),
+      ],
     };
   }
 
