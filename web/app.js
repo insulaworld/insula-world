@@ -209,6 +209,9 @@ const fireflies = { points: null, base: [] };
 // whichever direction from the dock reaches open water soonest. Returns the lantern positions.
 const pierDeck = new Set(); // pier planks: over water, but not somewhere to cast a line
 let pierAxis = null;       // which way the pier runs out to sea, and where it ends
+let pierTop = null;        // the deck surface height
+let solidSet = null;       // every solid block, "x,y,z" (for walking)
+const noWalk = new Set();  // "x,z" cells nobody climbs onto (the market stall counter)
 function buildPier(w, hash) {
   const { heights, waterLevel, places: P } = w;
   const d = P.dock, H = (x, z) => heights[x]?.[z] ?? 99;
@@ -229,6 +232,7 @@ function buildPier(w, hash) {
   const top = d.pier?.top ?? H(d.x, d.z) + 1.08; // deck surface, level with the dock tile
   const start = 1, len = best.first + 6; // from beside the dock tile to well past the shoreline
   pierAxis = { ax, az, endX: d.x + ax * len, endZ: d.z + az * len };
+  pierTop = top;
   const wood = [], dark = [], lamps = [], crates = [];
   const at = (i, j) => [d.x + ax * i + px * j, d.z + az * i + pz * j];
   for (let i = start; i <= len; i++) {
@@ -416,7 +420,7 @@ function buildWorld(w) {
   }
   // Market stall with lanterns
   const mh = plaza + 1, sx = P.market.x, sz = P.market.z - 2;
-  for (let dx = -1; dx <= 1; dx++) put(sx + dx, mh, sz, COL.plank);
+  for (let dx = -1; dx <= 1; dx++) { put(sx + dx, mh, sz, COL.plank); noWalk.add(`${sx + dx},${sz}`); }
   for (const dx of [-2, 2]) for (let y = 0; y <= 2; y++) put(sx + dx, mh + y, sz - 1, COL.plank2);
   for (let dx = -2; dx <= 2; dx++) for (let dz = -1; dz <= 0; dz++) put(sx + dx, mh + 3, sz + dz, (dx + 2) % 2 ? COL.awnB : COL.awnA);
   lanterns.push(new THREE.Vector3(sx - 2, mh + 2.6, sz + 0.6), new THREE.Vector3(sx + 2, mh + 2.6, sz + 0.6));
@@ -429,6 +433,10 @@ function buildWorld(w) {
   // Mine entrance posts
   const me = { x: P.mine.x - 3, z: P.mine.z + 3 };
   lanterns.push(new THREE.Vector3(me.x, heights[me.x][me.z] + 2.4, me.z));
+
+  // For walk mode: every solid block, ore included.
+  solidSet = new Set(solid.keys());
+  for (const [x, y, z] of glow) solidSet.add(`${x},${y},${z}`);
 
   // Keep only blocks with at least one exposed face.
   const visible = [];
@@ -1548,6 +1556,8 @@ function theftFx(e) {
 function onEvent(e) {
   if (e.type === 'story' && e.kind === 'theft') { theftFx(e); return; }
   if (e.type === 'story' && e.kind === 'refuse') { const r = agents.get(e.from); if (r) coinPop(r, 'REFUSED', true); return; }
+  // An on-chain rating after a caught theft: show the verdict over the thief.
+  if (e.type === 'reputation') { const r = agents.get(e.rated); if (r && e.value < 50) coinPop(r, `RATED ${e.value}/100 ON-CHAIN`, true); return; }
   if (e.type === 'thought') { addThought(e); return; }
   if (e.type === 'decision') {
     decisionCache.set(e.record.id, e.record);
@@ -1689,7 +1699,7 @@ function setFilm(on) {
 $('#film').addEventListener('click', (ev) => { ev.stopPropagation(); setFilm(true); });
 addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && film) setFilm(false);
-  if (e.key === 'f' && !film && !/input|textarea/i.test(document.activeElement?.tagName)) setFilm(true);
+  if (e.key === 'f' && !film && !walk.on && !/input|textarea/i.test(document.activeElement?.tagName)) setFilm(true);
 });
 renderer.domElement.addEventListener('click', () => { if (film) setFilm(false); });
 
@@ -1722,6 +1732,289 @@ function filmCamera(t, dt) {
   controls.target.lerp(look, cut ? 1 : Math.min(1, dt * 3));
   camera.lookAt(controls.target);
 }
+
+// ---------- Walk mode: visit the island on foot ----------
+// A first-person camera at ground level. Visitors are ghosts: the animals never see them and nothing they do
+// changes the island. WASD/arrows + mouse on a computer, a thumbstick and drag-to-look on a phone.
+const walk = {
+  on: false, pos: new THREE.Vector3(), eye: 0, vy: 0, yaw: 0, pitch: -0.08, keys: new Set(), stick: { x: 0, z: 0 },
+  saved: null, bob: 0, look: null, n: 0, grounded: true,
+};
+const EYE = 1.7, BODY_R = 0.26, BODY_H = 1.7, STEP = 1.05;
+const TOUCH = matchMedia('(pointer: coarse)').matches;
+
+// The surface (foot height) of the column at (xi, zi): the highest block whose top is at most `below`.
+function columnTop(xi, zi, below) {
+  for (let y = Math.floor(below) - 1; y >= 0; y--) if (solidSet.has(`${xi},${y},${zi}`)) return y + 1;
+  return 0;
+}
+// Where a walker with feet at `feet` would stand at (x, z), or null when that spot is the sea, a wall, a tree
+// trunk, a cliff more than one block high or inside a building.
+function footAt(x, z, feet) {
+  const xi = Math.round(x), zi = Math.round(z);
+  if (!world || xi < 1 || zi < 1 || xi >= world.size - 1 || zi >= world.size - 1) return null;
+  const deck = pierDeck.has(`${xi},${zi}`);
+  if (!deck && (world.heights[xi][zi] <= world.waterLevel || noWalk.has(`${xi},${zi}`))) return null;
+  const g = deck ? pierTop : columnTop(xi, zi, feet + STEP);
+  if (!deck && g > feet + STEP) return null;
+  for (let y = Math.floor(g + 0.01); y < g + BODY_H; y++) if (solidSet.has(`${xi},${y},${zi}`)) return null;
+  for (const b of latest?.buildings || []) {
+    if (b.x == null || b.type === 'harbor') continue;
+    const half = (b.kind === 'project' && (b.type === 'townhall' || b.type === 'markethall') ? 2.5 : 1.5) + 0.05;
+    if (Math.abs(x - b.x) < half && Math.abs(z - b.z) < half) return null;
+  }
+  return g;
+}
+// The body is a small square: every corner has to fit. Returns the ground under it, or null.
+function bodyAt(x, z, feet) {
+  let g = -Infinity;
+  for (const [ox, oz] of [[-BODY_R, -BODY_R], [BODY_R, -BODY_R], [-BODY_R, BODY_R], [BODY_R, BODY_R]]) {
+    const f = footAt(x + ox, z + oz, feet);
+    if (f == null) return null;
+    g = Math.max(g, f);
+  }
+  return g;
+}
+
+function enterWalk() {
+  if (walk.on || !world || !solidSet) return;
+  if (film) setFilm(false);
+  const P = world.places;
+  // Arrive near the market, at the spot (and facing the way) with the most open view of town, rather than
+  // nose to a wall: score each spot by how far you can see across a fan of directions at eye level.
+  const clear = (x, z, feet, h) => {
+    const sx = -Math.sin(h), sz = -Math.cos(h), eye = Math.floor(feet + EYE - 0.3);
+    for (let d = 1; d <= 24; d += 0.5) {
+      const px = x + sx * d, pz = z + sz * d, xi = Math.round(px), zi = Math.round(pz);
+      if (solidSet.has(`${xi},${eye},${zi}`) || solidSet.has(`${xi},${eye - 1},${zi}`)) return d;
+      if ((latest?.buildings || []).some((b) => b.x != null && b.type !== 'harbor' && Math.abs(px - b.x) < 1.6 && Math.abs(pz - b.z) < 1.6)) return d;
+    }
+    return 24;
+  };
+  let spot = null;
+  for (let r = 6; r <= 13; r++) for (let i = 0; i < 24; i++) {
+    const a = (i / 24) * Math.PI * 2, x = P.market.x + Math.cos(a) * r, z = P.market.z + Math.sin(a) * r;
+    const g = bodyAt(x, z, 99);
+    if (g == null || bodyAt(x, z, g) == null || Math.abs(g - (world.heights[P.market.x][P.market.z] + 1)) > 2) continue;
+    const h = Math.atan2(x - P.market.x, z - P.market.z); // facing the market
+    if (clear(x, z, g, h) < r - 2) continue;             // the plaza has to be in sight
+    const fan = [-0.6, -0.3, 0.3, 0.6].map((o) => clear(x, z, g, h + o));
+    const score = r + fan.reduce((t, v) => t + Math.min(v, 14), 0) / 8;
+    if (!spot || score > spot.score) spot = { x, z, g, h, score };
+  }
+  // Fallback: anywhere near the market.
+  for (let r = 3; r <= 12 && !spot; r++) for (let i = 0; i < 16 && !spot; i++) {
+    const a = (i / 16) * Math.PI * 2, x = P.market.x + Math.cos(a) * r, z = P.market.z + Math.sin(a) * r, g = bodyAt(x, z, 99);
+    if (g != null) spot = { x, z, g, h: Math.atan2(x - P.market.x, z - P.market.z) };
+  }
+  if (!spot) return;
+  walk.saved = { pos: camera.position.clone(), target: controls.target.clone(), fov: camera.fov, cam: camMode };
+  walk.pos.set(spot.x, spot.g, spot.z);
+  walk.eye = spot.g;
+  walk.vy = 0;
+  walk.yaw = spot.h;
+  walk.pitch = -0.08;
+  walk.on = true;
+  controls.enabled = false;
+  controls.autoRotate = false;
+  camera.fov = 68;
+  camera.updateProjectionMatrix();
+  document.body.classList.add('walking');
+  hud.hidden = false;
+  hint.classList.remove('gone');
+  clearTimeout(hint.t);
+  hint.t = setTimeout(() => hint.classList.add('gone'), 9000);
+  if (location.hash !== '#walk') history.replaceState(null, '', '#walk');
+}
+
+function leaveWalk() {
+  if (!walk.on) return;
+  walk.on = false;
+  walk.keys.clear();
+  walk.stick.x = walk.stick.z = 0;
+  if (document.pointerLockElement) document.exitPointerLock();
+  const s = walk.saved;
+  camera.fov = s.fov;
+  camera.updateProjectionMatrix();
+  camera.position.copy(s.pos);
+  controls.target.copy(s.target);
+  controls.enabled = true;
+  controls.autoRotate = camMode === 'orbit' && !REDUCED;
+  document.body.classList.remove('walking');
+  hud.hidden = true;
+  stickEl.hidden = true;
+  if (location.hash === '#walk') history.replaceState(null, '', location.pathname + location.search);
+}
+
+const raycaster = new THREE.Raycaster();
+const centerNdc = new THREE.Vector2(0, 0);
+// The animal under the crosshair (or under a tap), if it's close enough to meet.
+function animalAt(ndc) {
+  raycaster.setFromCamera(ndc, camera);
+  raycaster.far = 12;
+  let best = null;
+  for (const [id, rec] of agents) {
+    const hit = raycaster.intersectObject(rec.group, true)[0];
+    if (hit && (!best || hit.distance < best.d)) best = { id, d: hit.distance, name: rec.data.name };
+  }
+  return best;
+}
+function meet(found) {
+  if (!found) return;
+  if (document.pointerLockElement) document.exitPointerLock();
+  window.insulaProfile?.(found.id);
+}
+
+const _f = new THREE.Vector3();
+function stepWalk(dt, t) {
+  const k = walk.keys;
+  // Input: keys plus the thumbstick, in the direction the camera faces.
+  let mx = (k.has('d') ? 1 : 0) - (k.has('a') ? 1 : 0) + walk.stick.x;
+  let mz = (k.has('w') ? 1 : 0) - (k.has('s') ? 1 : 0) + walk.stick.z;
+  const m = Math.hypot(mx, mz);
+  if (m > 1) { mx /= m; mz /= m; }
+  const speed = (k.has('shift') ? 7.2 : 4.0) * (dialogOpen() ? 0 : 1);
+  const fx = -Math.sin(walk.yaw), fz = -Math.cos(walk.yaw), rx = Math.cos(walk.yaw), rz = -Math.sin(walk.yaw);
+  let dx = (fx * mz + rx * mx) * speed * dt, dz = (fz * mz + rz * mx) * speed * dt;
+  const p = walk.pos;
+  // Animals are solid too: slide around them rather than through.
+  for (const rec of agents.values()) {
+    const ox = p.x + dx - rec.pos.x, oz = p.z + dz - rec.pos.z, d = Math.hypot(ox, oz);
+    if (d < 0.75 && d > 1e-4 && Math.abs(rec.pos.y - p.y) < 1.5) { dx += (ox / d) * (0.75 - d); dz += (oz / d) * (0.75 - d); }
+  }
+  // Move one axis at a time so walls slide instead of stopping you dead.
+  if (dx && bodyAt(p.x + dx, p.z, p.y) != null) p.x += dx;
+  if (dz && bodyAt(p.x, p.z + dz, p.y) != null) p.z += dz;
+  // Gravity, jumping, stepping up one block.
+  const g = bodyAt(p.x, p.z, p.y) ?? p.y;
+  if (walk.keys.has(' ') && walk.grounded) { walk.vy = 6.2; walk.grounded = false; }
+  if (p.y > g + 0.001 || walk.vy > 0) {
+    walk.vy -= 20 * dt;
+    p.y += walk.vy * dt;
+    if (p.y <= g) { p.y = g; walk.vy = 0; walk.grounded = true; }
+    else walk.grounded = false;
+  } else { p.y = g; walk.vy = 0; walk.grounded = true; }
+  // The eye follows the feet smoothly (steps don't jolt), with a gentle bob while walking.
+  walk.eye += (p.y - walk.eye) * Math.min(1, dt * 14);
+  const moving = m > 0.05 && walk.grounded && speed > 0;
+  walk.bob = moving ? walk.bob + dt * (k.has('shift') ? 13 : 9) : walk.bob * 0.9;
+  camera.position.set(p.x, walk.eye + EYE + (moving ? Math.abs(Math.sin(walk.bob)) * 0.06 : 0), p.z);
+  camera.rotation.set(walk.pitch, walk.yaw, 0, 'YXZ');
+  camera.getWorldDirection(_f);
+  controls.target.copy(camera.position).addScaledVector(_f, 3); // keeps the tilt-shift off and the rain around you
+  // Who's in front of you (checked a few times a second).
+  if (!TOUCH && (walk.n = (walk.n + 1) % 8) === 0) {
+    const a = animalAt(centerNdc);
+    walk.look = a;
+    lookEl.textContent = a ? `${a.name} · click to read their mind` : '';
+    hud.classList.toggle('aim', !!a);
+  }
+}
+
+function dialogOpen() {
+  return !!document.querySelector('#profile:not([hidden]), #econ:not([hidden]), #vote:not([hidden]), #paper:not([hidden]), #why:not([hidden])');
+}
+
+// ---------- Walk mode: interface ----------
+const walkBtn = document.createElement('button');
+walkBtn.type = 'button';
+walkBtn.id = 'walk-btn';
+walkBtn.textContent = 'Walk in';
+walkBtn.title = 'Visit the island on foot';
+$('#cams').insertBefore(walkBtn, $('#cams').children[1] || null);
+walkBtn.addEventListener('click', enterWalk);
+
+const hud = document.createElement('div');
+hud.id = 'walk-hud';
+hud.hidden = true;
+hud.innerHTML = `
+  <div class="walk-top">
+    <span class="walk-tag mono">VISITING INSULA</span>
+    <button id="walk-leave" class="chip mono" type="button">LEAVE ✕</button>
+  </div>
+  <div class="walk-cross" aria-hidden="true"></div>
+  <div class="walk-look mono" aria-live="polite"></div>
+  <div class="walk-hint mono">${TOUCH
+    ? 'Left thumb to walk · Drag to look around · Tap an animal to read its mind'
+    : 'WASD to walk · Mouse to look · Shift to run · Space to jump · Click an animal to read its mind · Esc to leave'}</div>`;
+document.body.appendChild(hud);
+const hint = hud.querySelector('.walk-hint');
+const lookEl = hud.querySelector('.walk-look');
+hud.querySelector('#walk-leave').addEventListener('click', (e) => { e.stopPropagation(); leaveWalk(); });
+
+const stickEl = document.createElement('div');
+stickEl.id = 'walk-stick';
+stickEl.hidden = true;
+stickEl.innerHTML = '<i></i>';
+document.body.appendChild(stickEl);
+
+const KEYMAP = { arrowup: 'w', arrowdown: 's', arrowleft: 'a', arrowright: 'd' };
+addEventListener('keydown', (e) => {
+  if (!walk.on || /input|textarea/i.test(document.activeElement?.tagName)) return;
+  const key = KEYMAP[e.key.toLowerCase()] || e.key.toLowerCase();
+  if (e.key === 'Escape') { if (!dialogOpen()) leaveWalk(); return; }
+  if (key === 'e' && walk.look) { meet(walk.look); return; }
+  if (['w', 'a', 's', 'd', 'shift', ' '].includes(key)) { walk.keys.add(key); if (key === ' ') e.preventDefault(); }
+});
+addEventListener('keyup', (e) => walk.keys.delete(KEYMAP[e.key.toLowerCase()] || e.key.toLowerCase()));
+addEventListener('blur', () => walk.keys.clear());
+
+// Mouse: click to lock the pointer and look around; click again (locked) to meet the animal in the crosshair.
+const cv = renderer.domElement;
+let drag = null;
+cv.addEventListener('pointerdown', (e) => {
+  if (!walk.on) return;
+  if (e.pointerType === 'mouse') {
+    if (document.pointerLockElement === cv) { meet(walk.look); return; }
+    cv.requestPointerLock?.()?.catch?.(() => {});
+    return;
+  }
+  // Touch: the lower-left quarter is the thumbstick, anywhere else drags the view (a quick tap meets).
+  if (e.clientX < innerWidth * 0.45 && e.clientY > innerHeight * 0.45 && !walk.stickId) {
+    walk.stickId = e.pointerId;
+    walk.stickAt = { x: e.clientX, y: e.clientY };
+    stickEl.hidden = false;
+    stickEl.style.left = `${e.clientX}px`;
+    stickEl.style.top = `${e.clientY}px`;
+    stickEl.firstChild.style.transform = 'translate(-50%, -50%)';
+  } else if (!drag) drag = { id: e.pointerId, x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, at: performance.now() };
+  try { cv.setPointerCapture(e.pointerId); } catch {}
+});
+cv.addEventListener('pointermove', (e) => {
+  if (!walk.on) return;
+  if (e.pointerId === walk.stickId) {
+    let sx = e.clientX - walk.stickAt.x, sy = e.clientY - walk.stickAt.y;
+    const d = Math.hypot(sx, sy), max = 46;
+    if (d > max) { sx *= max / d; sy *= max / d; }
+    walk.stick.x = sx / max; walk.stick.z = -sy / max;
+    stickEl.firstChild.style.transform = `translate(calc(-50% + ${sx}px), calc(-50% + ${sy}px))`;
+  } else if (drag && e.pointerId === drag.id) {
+    turn((e.clientX - drag.x) * 0.0055, (e.clientY - drag.y) * 0.0055);
+    drag.x = e.clientX; drag.y = e.clientY;
+  }
+});
+const release = (e) => {
+  if (!walk.on) return;
+  if (e.pointerId === walk.stickId) { walk.stickId = null; walk.stick.x = walk.stick.z = 0; stickEl.hidden = true; }
+  else if (drag && e.pointerId === drag.id) {
+    const tap = Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 8 && performance.now() - drag.at < 350;
+    if (tap && e.type === 'pointerup') meet(animalAt(new THREE.Vector2((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1)));
+    drag = null;
+  }
+};
+cv.addEventListener('pointerup', release);
+cv.addEventListener('pointercancel', release);
+addEventListener('mousemove', (e) => { if (walk.on && document.pointerLockElement === cv) turn(e.movementX * 0.0022, e.movementY * 0.0022); });
+document.addEventListener('pointerlockchange', () => hud.classList.toggle('locked', document.pointerLockElement === cv));
+function turn(dx, dy) {
+  walk.yaw -= dx;
+  walk.pitch = Math.max(-1.35, Math.min(1.2, walk.pitch - dy));
+}
+if (location.hash === '#walk') {
+  const tryEnter = () => (world && solidSet ? enterWalk() : setTimeout(tryEnter, 400));
+  setTimeout(tryEnter, 1200);
+}
+window.insulaWalk = enterWalk;
 
 // ---------- Buildings: houses and workshops the builder puts up ----------
 const builtMeshes = new Map(); // id -> render record
@@ -2206,7 +2499,7 @@ function frame() {
   }
   for (const p of pops) if (p.el.isConnected) project(p.rec.pos, p.el, 3.5);
   for (let i = pops.length - 1; i >= 0; i--) if (!pops[i].el.isConnected) pops.splice(i, 1);
-  for (const p of places) project(p.pos, p.el, 0, p.maxDist ?? 110);
+  for (const p of places) project(p.pos, p.el, 0, walk.on ? Math.min(p.maxDist ?? 110, 24) : p.maxDist ?? 110); // on foot, only nearby signs
   if ((declutterN = (declutterN + 1) % 6) === 0) declutter();
   stepBuildings(t);
 
@@ -2237,7 +2530,7 @@ function frame() {
     fireflies.points.geometry.attributes.position.needsUpdate = true;
     const m = fireflies.points.material;
     m.opacity = 0.15 + nightness * 0.85 * (0.75 + Math.sin(t * 3) * 0.25);
-    m.size = 0.25 + nightness * 0.35;
+    m.size = (0.25 + nightness * 0.35) * (walk.on ? 0.3 : 1); // up close on foot they'd be huge blobs
     m.color.setHex(nightness > 0.4 ? 0xfff1a8 : 0xffffff);
   }
   stepFish(dt, t);
@@ -2251,13 +2544,14 @@ function frame() {
 
   // A recording script can take over the camera (used to film the trailers).
   if (window.__cineCam) window.__cineCam({ camera, controls, agents, world, THREE, t, dt });
+  else if (walk.on) stepWalk(dt, t);
   else if (film) filmCamera(t, dt);
   else if (camMode !== 'orbit' && agents.has(camMode)) {
     const rec = agents.get(camMode);
     controls.target.lerp(tmp.copy(rec.pos).setY(rec.pos.y + 1.2), Math.min(1, dt * 3));
     camera.position.lerp(rec.pos.clone().add(new THREE.Vector3(8, 6.5, 8)), Math.min(1, dt * 1.5));
   }
-  if (!film) controls.update();
+  if (!film && !walk.on) controls.update();
   composer.render();
   requestAnimationFrame(frame);
 }

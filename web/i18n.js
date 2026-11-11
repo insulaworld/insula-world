@@ -99,6 +99,9 @@ const DICT = {
   Press: '按', 'or tap to leave film mode': '或点击屏幕退出电影模式',
   'Copy the contract address': '复制合约地址', 'Insula World on X': 'Insula World 的 X 账号', '@InsulaWorld on X': 'X 上的 @InsulaWorld',
   'Insula World code on GitHub': 'Insula World 的 GitHub 代码', 'Open source on GitHub': 'GitHub 上开源', Camera: '镜头', Island: '全岛',
+  'Walk in': '步行入岛', 'Visit the island on foot': '步行游览小岛', 'VISITING INSULA': '正在游览 INSULA', 'LEAVE ✕': '离开 ✕',
+  'WASD to walk · Mouse to look · Shift to run · Space to jump · Click an animal to read its mind · Esc to leave': 'WASD 行走 · 鼠标环视 · Shift 奔跑 · 空格跳跃 · 点击动物查看它的想法 · Esc 离开',
+  'Left thumb to walk · Drag to look around · Tap an animal to read its mind': '左手拇指行走 · 拖动环视 · 点击动物查看它的想法',
   // Story panel
   'The story so far': '故事进展', 'To be continued…': '未完待续…', built: '已建成', 'funded · building': '已筹满 · 建造中',
   'The city stands': '城市已建成', 'The founding story is told. The economy keeps running on its own.': '建城的故事讲完了。经济继续自己运转。',
@@ -288,6 +291,7 @@ const P = [
   [/^Day (\d+) · (so far)$/, (m) => `第 ${m[1]} 天 · 截至目前`],
   [/^Day (\d+) · (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d+), (.+)$/, (m) => `第 ${m[1]} 天 · ${MONTH[m[2]]}月${m[3]}日 ${timeAP(m[4])}`],
   [/^(\w+): ([\d,]+) coins\. Open profile\.$/, (m) => `${m[1]}：${m[2]} 金币。打开档案。`],
+  [/^(.+) · click to read their mind$/, (m) => `${m[1]} · 点击查看它的想法`],
   [/^Island prices over time: (.+)$/, (m) => `岛上价格走势：${m[1]}`],
   [/^Trades per day: (.+)$/, (m) => `每日交易：${m[1]}`],
   // Profiles

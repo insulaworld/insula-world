@@ -577,3 +577,45 @@ button.vote-why { align-self: flex-start; margin-top: auto; font-size: 9.5px; le
   .vote-rules > div { flex-direction: row; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
   .vote-rules b { font-size: 17px; }
 }
+
+/* ---------- Walk mode ---------- */
+#cams #walk-btn { color: var(--gold); }
+#cams #walk-btn:hover { color: #fff; }
+body.walking .ui, body.walking #banner { opacity: 0; pointer-events: none; }
+#walk-hud { position: fixed; inset: 0; pointer-events: none; z-index: 11; }
+#walk-hud[hidden] { display: none; }
+.walk-top { position: absolute; top: calc(var(--gutter-t) + 2px); left: var(--gutter-l); right: var(--gutter-r); display: flex; justify-content: space-between; align-items: center; }
+.walk-tag { font-size: 11px; letter-spacing: 0.24em; color: rgba(255, 255, 255, 0.9); text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6); }
+#walk-leave { pointer-events: auto; cursor: pointer; }
+.walk-cross { position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: rgba(255, 255, 255, 0.75); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35); transition: transform 0.15s ease, background 0.15s ease; }
+#walk-hud.aim .walk-cross { transform: scale(1.8); background: var(--gold); }
+.walk-look { position: absolute; left: 50%; top: calc(50% + 18px); transform: translateX(-50%); font-size: 11px; letter-spacing: 0.08em; color: #fff; text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8); white-space: nowrap; }
+.walk-hint { position: absolute; left: 50%; bottom: calc(var(--gutter-b) + 8px); transform: translateX(-50%); max-width: calc(100vw - 32px); text-align: center; font-size: 11px; letter-spacing: 0.06em; padding: 9px 16px; border-radius: 999px; background: var(--glass); border: 1px solid var(--line); color: var(--text); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); transition: opacity 0.8s ease; }
+.walk-hint.gone { opacity: 0; }
+@media (pointer: coarse) { .walk-cross, .walk-look { display: none; } .walk-hint { border-radius: 14px; } }
+#walk-stick { position: fixed; width: 104px; height: 104px; margin: -52px 0 0 -52px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.35); background: rgba(10, 14, 20, 0.25); pointer-events: none; z-index: 11; }
+#walk-stick[hidden] { display: none; }
+#walk-stick i { position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; border-radius: 50%; background: rgba(255, 255, 255, 0.7); transform: translate(-50%, -50%); }
+body.walking #scene canvas { touch-action: none; }
+
+/* ---------- On-chain reputation (profile) ---------- */
+.rep-top { display: flex; gap: 16px; align-items: center; margin: 2px 0 12px; }
+.rep-top p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
+.rep-top p .mono { display: block; font-size: 10px; color: var(--muted); margin-top: 3px; }
+.rep-score { flex: none; display: flex; align-items: baseline; gap: 2px; padding: 10px 14px; border-radius: 14px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.04); }
+.rep-score b { font-size: 34px; font-weight: 600; line-height: 1; }
+.rep-score span { font-size: 11px; color: var(--muted); }
+.rep-score.good b, .rep-v.good { color: var(--mint); }
+.rep-score.mid b, .rep-v.mid { color: var(--gold); }
+.rep-score.bad b, .rep-v.bad { color: var(--rose); }
+.rep-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.rep-tag { display: inline-flex; align-items: center; gap: 7px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; }
+.rep-tag .mono { font-size: 9px; letter-spacing: 0.12em; color: var(--muted); }
+.rep-tag i { font-style: normal; font-size: 9px; color: var(--muted); }
+.rep-tag.good b { color: var(--mint); } .rep-tag.mid b { color: var(--gold); } .rep-tag.bad b { color: var(--rose); }
+.rep-list { list-style: none; margin: 0; padding: 0 0 4px; display: flex; flex-direction: column; }
+.rep-list li { display: grid; grid-template-columns: 34px 1fr; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+.rep-list li:first-child { border-top: 0; }
+.rep-list .rep-v { font-size: 16px; font-weight: 600; text-align: right; }
+.rep-list p { margin: 0 0 2px; font-size: 12px; } .rep-list .who { font-weight: 600; }
+.rep-list span.mono { font-size: 10px; color: var(--muted); line-height: 1.45; }
