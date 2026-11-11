@@ -152,8 +152,11 @@ export class Election {
     this.current = { n: this.n, openedAt, voteAt: this.voteAt, candidates: [], votes: {}, result: null };
     sim.log(`Election ${this.n}: the race for mayor is open. Voting in ${hours(this.campaignMs())}.`);
     sim.emit({ type: 'election', kind: 'open', n: this.n, voteAt: this.voteAt });
-    // The mayor first (always runs), then everyone else, richest first.
-    const order = Object.values(sim.agents).sort((a, b) => (a.id === o.mayor ? -1 : b.id === o.mayor ? 1 : sim.chain.balance(b.id) - sim.chain.balance(a.id)));
+    // The mayor first (always runs), then everyone else in a random order, so with only 4 places on the
+    // ballot every animal gets a fair chance to decide before it fills up.
+    const others = Object.values(sim.agents).filter((a) => a.id !== o.mayor);
+    for (let i = others.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [others[i], others[j]] = [others[j], others[i]]; }
+    const order = [sim.agents[o.mayor], ...others].filter(Boolean);
     for (const agent of order) {
       if (this.current.candidates.length >= MAX_CANDIDATES) break;
       const facts = this.#facts(agent, { running: this.current.candidates.map((c) => `${c.name} (tax ${c.tax}, fine ${c.fine}, ${c.focus}: "${c.pitch}")`) });
