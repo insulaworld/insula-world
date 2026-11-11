@@ -207,6 +207,8 @@ const fireflies = { points: null, base: [] };
 // A proper pier at the dock: a 3-wide deck on posts, railings, a wider landing at the far end, lanterns,
 // crates for the mainland trade and a rowboat tied alongside. It runs straight out (along x or z) in
 // whichever direction from the dock reaches open water soonest. Returns the lantern positions.
+const pierDeck = new Set(); // pier planks: over water, but not somewhere to cast a line
+let pierAxis = null;       // which way the pier runs out to sea, and where it ends
 function buildPier(w, hash) {
   const { heights, waterLevel, places: P } = w;
   const d = P.dock, H = (x, z) => heights[x]?.[z] ?? 99;
@@ -226,6 +228,7 @@ function buildPier(w, hash) {
   const px = -az, pz = ax; // across the pier
   const top = d.pier?.top ?? H(d.x, d.z) + 1.08; // deck surface, level with the dock tile
   const start = 1, len = best.first + 6; // from beside the dock tile to well past the shoreline
+  pierAxis = { ax, az, endX: d.x + ax * len, endZ: d.z + az * len };
   const wood = [], dark = [], lamps = [], crates = [];
   const at = (i, j) => [d.x + ax * i + px * j, d.z + az * i + pz * j];
   for (let i = start; i <= len; i++) {
@@ -233,6 +236,7 @@ function buildPier(w, hash) {
     for (let j = -wide; j <= wide; j++) {
       const [x, z] = at(i, j);
       wood.push({ x, y: top - 0.12, z, sx: 1, sy: 0.22, sz: 1, c: i % 2 ? COL.plank : 0xa87440 });
+      pierDeck.add(`${Math.round(x)},${Math.round(z)}`);
     }
     // Posts down into the water, every other plank row, on both edges
     if ((i - start) % 2 === 0 || i === len) for (const j of [-wide, wide]) {
@@ -615,6 +619,45 @@ function part(w, h, d, color, x = 0, y = 0, z = 0, opts = {}) {
   return mesh;
 }
 
+// Fishing helpers: where the water surface is, and which way from a spot the nearest open water lies.
+const UP = new THREE.Vector3(0, 1, 0);
+const ROD_TIP = new THREE.Vector3(0, 0.4, 1.7); // end of the rod, in the rod's own space
+const fishTmp = new THREE.Vector3(), fishDir = new THREE.Vector3();
+const WATER_Y = () => (world ? world.waterLevel + 0.9 : 1.9);
+const aimCache = new Map();
+// Which way to cast from (x, z). `pref` is the server's heading (it already points pier and dock fishers at
+// the water); keep it when open water really is out that way, otherwise turn to the nearest open water.
+function waterAim(x, z, pref) {
+  const key = `${Math.round(x * 2)},${Math.round(z * 2)},${Math.round((pref || 0) * 4)}`;
+  if (aimCache.has(key)) return aimCache.get(key);
+  let best = null;
+  const onDeck = (px, pz) => pierDeck.has(`${Math.round(px)},${Math.round(pz)}`);
+  const wet = (px, pz) => world && (world.heights[Math.round(px)]?.[Math.round(pz)] ?? 0) <= world.waterLevel && !onDeck(px, pz);
+  // first open water along heading h, within `max` units (two wet cells in a row, so a puddle doesn't count)
+  const ray = (h, max) => {
+    const sx = Math.sin(h), sz = Math.cos(h);
+    for (let d = 0.5; d <= max; d += 0.5) if (wet(x + sx * d, z + sz * d) && wet(x + sx * (d + 1), z + sz * (d + 1))) return d;
+    return null;
+  };
+  if (pref != null && Number.isFinite(pref)) { const d = ray(pref, 3); if (d != null) best = { heading: pref, dist: d }; }
+  if (!best && pierAxis && onDeck(x, z)) {
+    // On the pier: near the end, cast straight out past it; further back, cast off the side.
+    const toEnd = (pierAxis.endX - x) * pierAxis.ax + (pierAxis.endZ - z) * pierAxis.az;
+    const out = Math.atan2(pierAxis.ax, pierAxis.az);
+    if (toEnd < 2.5) best = { heading: out, dist: Math.max(0.5, toEnd + 0.5) };
+    else for (const h of [out + Math.PI / 2, out - Math.PI / 2]) { const d = ray(h, 4); if (d != null && (!best || d < best.dist)) best = { heading: h, dist: d }; }
+    if (!best) best = { heading: out, dist: Math.max(0.5, toEnd + 0.5) };
+  } else if (!best && world) {
+    for (let i = 0; i < 32; i++) {
+      const h = (i / 32) * Math.PI * 2, d = ray(h, 7);
+      if (d != null && (!best || d < best.dist)) best = { heading: h, dist: d };
+    }
+  }
+  if (aimCache.size > 500) aimCache.clear();
+  aimCache.set(key, best);
+  return best;
+}
+
 // Every agent can do every job, so every agent carries a pickaxe, an axe and a fishing rod.
 function addTools(g, body, hand) {
   const pick = new THREE.Group();
@@ -645,8 +688,15 @@ function addTools(g, body, hand) {
   const hammerHead = part(0.32, 0.14, 0.14, 0x8f989f, 0, 0.55, 0, { metalness: 0.8, roughness: 0.35 });
   hammer.add(hammerHead);
 
-  for (const t of [pick, axe, rod, hammer]) { t.visible = false; body.add(t); }
-  g.userData.tools = { mining: { g: pick, tip: pickHead }, chopping: { g: axe, tip: axeHead }, fishing: { g: rod, tip: bobber }, building: { g: hammer, tip: hammerHead } };
+  // A hoe for the fields (farmers used to just stand there).
+  const hoe = new THREE.Group();
+  hoe.position.set(hand.x, hand.y, hand.z);
+  hoe.add(part(0.07, 1.0, 0.07, 0x8a5a2b, 0, 0.36, 0));
+  const hoeHead = part(0.3, 0.08, 0.22, 0x9aa3ab, 0, 0.84, 0.1, { metalness: 0.7, roughness: 0.4 });
+  hoe.add(hoeHead);
+
+  for (const t of [pick, axe, rod, hammer, hoe]) { t.visible = false; body.add(t); }
+  g.userData.tools = { mining: { g: pick, tip: pickHead }, chopping: { g: axe, tip: axeHead }, fishing: { g: rod, tip: bobber, line }, building: { g: hammer, tip: hammerHead }, farming: { g: hoe, tip: hoeHead } };
 }
 
 // Everyone who arrives after genesis: one shared builder, a different look per species.
@@ -1969,6 +2019,27 @@ function project(v, el, dy = 0, maxDist = Infinity) {
   el.style.top = `${(-tmp.y * 0.5 + 0.5) * innerHeight}px`;
 }
 
+// Place labels give way to the animals' name tags (and to each other) instead of printing on top of them.
+let declutterN = 0;
+function declutter() {
+  const taken = [];
+  const rect = (el) => {
+    const x = parseFloat(el.style.left), y = parseFloat(el.style.top), w = el.offsetWidth, h = el.offsetHeight;
+    return { l: x - w / 2 - 4, r: x + w / 2 + 4, t: y - h - 2, b: y + 2 };
+  };
+  const hits = (q) => taken.some((o) => q.l < o.r && q.r > o.l && q.t < o.b && q.b > o.t);
+  for (const rec of agents.values()) if (rec.tag.style.visibility === 'visible') taken.push(rect(rec.tag));
+  for (const p of places) {
+    if (p.el.style.visibility !== 'visible') continue;
+    const q = rect(p.el);
+    // only the text line at the bottom matters (the thin pointer line above it can cross things)
+    q.t = q.b - 18;
+    const clash = hits(q);
+    p.el.classList.toggle('clash', clash);
+    if (!clash) taken.push(q);
+  }
+}
+
 // ---------- Rain ----------
 // Showers come and go on a shared schedule (from the clock, so every viewer sees the same weather): the day is
 // cut into 12-minute windows and about one in five is rainy, fading in and out over a minute. #rain forces it on.
@@ -2040,7 +2111,9 @@ function frame() {
     const ahead = rec.vel && a.moving ? Math.min(0.3, (performance.now() - rec.tickAt) / 1000) : 0;
     tmp.set(a.x + (ahead ? rec.vel.x * ahead : 0), a.y, a.z + (ahead ? rec.vel.z * ahead : 0));
     rec.pos.lerp(tmp, Math.min(1, dt * 8));
-    let dh = a.heading - rec.heading;
+    // Fishing: face the nearest open water (the server's heading is just the last walking direction).
+    const fishAim = a.activity === 'fishing' && !a.moving ? waterAim(a.x, a.z, a.heading) : null;
+    let dh = (fishAim ? fishAim.heading : a.heading) - rec.heading;
     while (dh > Math.PI) dh -= Math.PI * 2;
     while (dh < -Math.PI) dh += Math.PI * 2;
     rec.heading += dh * Math.min(1, dt * 7);
@@ -2080,21 +2153,37 @@ function frame() {
     if (tail) tail.rotation.y = Math.sin(t * 3) * 0.4;
     const tools = g.userData.tools;
     for (const [k, tl] of Object.entries(tools)) tl.g.visible = a.activity === k;
-    if (a.activity === 'mining' || a.activity === 'chopping' || a.activity === 'building') {
+    if ((a.activity === 'mining' || a.activity === 'chopping' || a.activity === 'building' || a.activity === 'farming') && tools[a.activity]) {
       const tl = tools[a.activity];
-      const s = Math.sin(t * (a.activity === 'mining' ? 5 : a.activity === 'building' ? 7 : 6));
+      const s = Math.sin(t * (a.activity === 'mining' ? 5 : a.activity === 'building' ? 7 : a.activity === 'farming' ? 3.5 : 6) + rec.pos.x);
       tl.g.rotation.x = -Math.abs(s) * 1.5;
       const hit = s > 0.97;
       if (hit && !rec.swung) {
         const tip = new THREE.Vector3();
         tl.tip.getWorldPosition(tip);
-        burst(tip, a.activity === 'mining' ? 0xffa63d : a.activity === 'building' ? 0xd9b07a : 0xc08850, 6, 3, -11, 0.45, 0.8);
-        sound.thunk(earVolume(tip));
+        burst(tip, a.activity === 'mining' ? 0xffa63d : a.activity === 'building' ? 0xd9b07a : a.activity === 'farming' ? 0x7a5a32 : 0xc08850, 6, 3, -11, 0.45, 0.8);
+        if (a.activity !== 'farming') sound.thunk(earVolume(tip));
       }
       rec.swung = hit;
     } else if (a.activity === 'fishing') {
-      tools.fishing.g.rotation.x = -0.55 + Math.sin(t * 1.5) * 0.06;
-      tools.fishing.tip.position.y = -1.15 + Math.sin(t * 3) * 0.05;
+      const rod = tools.fishing;
+      rod.g.rotation.x = -0.55 + Math.sin(t * 1.5) * 0.06;
+      // The bobber floats on the water surface out in front, and the line runs from the rod tip to it.
+      if (!fishAim) { rod.tip.position.set(0, -1.15 + Math.sin(t * 3) * 0.05, 1.68); rod.line.position.set(0, -0.35, 1.68); rod.line.scale.set(1, 1, 1); rod.line.quaternion.identity(); }
+      else {
+      const reach = Math.min(fishAim.dist + 2.5, Math.max(2.4, fishAim.dist + 1.2));
+      const fw = rec.heading;
+      fishTmp.set(rec.pos.x + Math.sin(fw) * reach, WATER_Y() + Math.sin(t * 3 + rec.pos.x) * 0.05, rec.pos.z + Math.cos(fw) * reach);
+      g.updateMatrixWorld(true);
+      rod.g.worldToLocal(fishTmp);
+      rod.tip.position.copy(fishTmp);
+      const line = rod.line;
+      fishDir.subVectors(fishTmp, ROD_TIP);
+      const len = fishDir.length();
+      line.position.copy(ROD_TIP).addScaledVector(fishDir, 0.5);
+      line.scale.set(1, len / 1.6, 1);
+      line.quaternion.setFromUnitVectors(UP, fishDir.normalize());
+      }
     }
     rec.tag.classList.toggle('thinking', !!a.thinking);
     project(rec.pos, rec.tag, 2.5, 60);
@@ -2118,6 +2207,7 @@ function frame() {
   for (const p of pops) if (p.el.isConnected) project(p.rec.pos, p.el, 3.5);
   for (let i = pops.length - 1; i >= 0; i--) if (!pops[i].el.isConnected) pops.splice(i, 1);
   for (const p of places) project(p.pos, p.el, 0, p.maxDist ?? 110);
+  if ((declutterN = (declutterN + 1) % 6) === 0) declutter();
   stepBuildings(t);
 
   // Atmosphere

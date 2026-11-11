@@ -199,7 +199,8 @@ class Agent {
       job: this.inOffice && this.role !== 'mayor' ? `${this.job} & mayor` : !this.inOffice && this.role === 'mayor' && this.sim.election?.office ? 'former mayor' : this.job,
       color: this.color, accent: this.accent,
       x: +this.x.toFixed(3), z: +this.z.toFixed(3), y: groundY(this.sim.world, this.x, this.z),
-      heading: +this.heading.toFixed(3),
+      // At work, keep facing the work (the rock, tree or water) once a chat with a customer is over.
+      heading: +(this.activity && this.workHeading != null && !this.engaged ? this.workHeading : this.heading).toFixed(3),
       moving: !this.engaged && Boolean(this.target || this.follow),
       task: this.task, activity: this.activity, thinking: this.thinking,
       inv: { ...this.inv }, hunger: this.hunger,
@@ -942,7 +943,11 @@ export class Sim {
       // The West Hill quarry is open to everyone once unlocked; locals prefer it.
       const pool = this.zonesOpen().has('west') && (agent.homeZone === 'west' || Math.random() < 0.35) ? w.ores2 : w.ores;
       const s = pool[Math.floor(Math.random() * pool.length)];
-      return { x: s.x + 0.5, z: s.z + 0.5 };
+      // Stand beside the ore (not on it) and face it, so the pick swings at the rock.
+      const sides = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dz]) => ({ x: s.x + dx * 0.95, z: s.z + dz * 0.95 }))
+        .filter((p) => this.#standable(p.x, p.z) && Math.abs((w.heights[Math.round(p.x)]?.[Math.round(p.z)] ?? 99) - w.heights[s.x][s.z]) <= 1 && !pool.some((o) => o !== s && Math.round(p.x) === o.x && Math.round(p.z) === o.z));
+      const p = sides.length ? sides[Math.floor(Math.random() * sides.length)] : { x: s.x + 0.5, z: s.z + 0.5 };
+      return { x: p.x, z: p.z, face: { x: s.x, z: s.z } };
     }
     if (item === 'fish') {
       const north = this.zonesOpen().has('north') && (agent.homeZone === 'north' || Math.random() < 0.3);
@@ -977,6 +982,7 @@ export class Sim {
     agent.task = `walking to ${{ ore: 'dig', fish: 'fish', wood: 'chop wood', grain: 'the fields' }[item]}`;
     await agent.walkTo(spot.x, spot.z);
     if (spot.face) agent.heading = Math.atan2(spot.face.x - agent.x, spot.face.z - agent.z);
+    agent.workHeading = spot.face ? agent.heading : null;
     const verb = RESOURCES[item].verb;
     agent.task = verb;
     agent.activity = { ore: 'mining', fish: 'fishing', wood: 'chopping', grain: 'farming' }[item];
@@ -993,6 +999,7 @@ export class Sim {
       }
     } finally {
       agent.activity = null;
+      agent.workHeading = null;
     }
     agent.remember(`${verb}, now holding ${agent.inv[item]} ${item}`);
     if (agent.hunger >= 8) agent.speak('Too hungry to keep going.');
