@@ -1740,7 +1740,7 @@ const walk = {
   on: false, pos: new THREE.Vector3(), eye: 0, vy: 0, yaw: 0, pitch: -0.08, keys: new Set(), stick: { x: 0, z: 0 },
   saved: null, bob: 0, look: null, n: 0, grounded: true,
 };
-const EYE = 1.7, BODY_R = 0.26, BODY_H = 1.7, STEP = 1.05;
+const EYE = 1.7, BODY_R = 0.26, BODY_H = 1.7, STEP = 1.05, JUMP_V = 7.4; // a jump clears about 1.4 blocks: with the step, two-block ledges but not walls
 const TOUCH = matchMedia('(pointer: coarse)').matches;
 
 // The surface (foot height) of the column at (xi, zi): the highest block whose top is at most `below`.
@@ -1883,11 +1883,18 @@ function stepWalk(dt, t) {
     if (d < 0.75 && d > 1e-4 && Math.abs(rec.pos.y - p.y) < 1.5) { dx += (ox / d) * (0.75 - d); dz += (oz / d) * (0.75 - d); }
   }
   // Move one axis at a time so walls slide instead of stopping you dead.
+  const blocked = (dx && bodyAt(p.x + dx, p.z, p.y) == null) || (dz && bodyAt(p.x, p.z + dz, p.y) == null);
   if (dx && bodyAt(p.x + dx, p.z, p.y) != null) p.x += dx;
   if (dz && bodyAt(p.x, p.z + dz, p.y) != null) p.z += dz;
-  // Gravity, jumping, stepping up one block.
+  // Gravity, jumping, stepping up one block. Walking into a ledge two blocks high hops you up it (there's no
+  // jump key on a phone); anything taller is a wall.
   const g = bodyAt(p.x, p.z, p.y) ?? p.y;
-  if (walk.keys.has(' ') && walk.grounded) { walk.vy = 6.2; walk.grounded = false; }
+  if (blocked && walk.grounded && m > 0.05 && speed > 0) {
+    const d = Math.hypot(dx, dz) || 1, ax = p.x + (dx / d) * 0.45, az = p.z + (dz / d) * 0.45;
+    const up = bodyAt(ax, az, p.y + 1);
+    if (up != null && up > p.y + STEP && up <= p.y + 2 + 0.05) { walk.vy = JUMP_V; walk.grounded = false; }
+  }
+  if (walk.keys.has(' ') && walk.grounded) { walk.vy = JUMP_V; walk.grounded = false; }
   if (p.y > g + 0.001 || walk.vy > 0) {
     walk.vy -= 20 * dt;
     p.y += walk.vy * dt;
