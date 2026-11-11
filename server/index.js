@@ -11,6 +11,7 @@ import { AGENT_DEFS } from './agents.js';
 import { createChain } from './chain.js';
 import { Identity } from './identity.js';
 import { Reputation } from './reputation.js';
+import { Validation } from './validation.js';
 import { Sim } from './sim.js';
 import { llmStats, llmUsage } from './brain.js';
 import { DEFAULT_DAY_MS } from './eras.js';
@@ -59,6 +60,7 @@ const identity = new Identity(sim, saved?.identity);
 sim.identity = identity;
 const reputation = new Reputation(sim, identity, saved?.reputation);
 sim.reputation = reputation;
+const validation = new Validation(sim, identity);
 sim.on((e) => { try { reputation.record(e); } catch (err) { console.error('[reputation] record', err.message); } });
 
 function save() {
@@ -92,6 +94,8 @@ app.get('/agents/:file', (req, res, next) => {
 app.get('/.well-known/agent-registration.json', (_req, res) => res.json(identity.wellKnown()));
 app.get('/api/identity', (_req, res) => res.json(identity.view()));
 // On-chain reputation (ERC-8004): what the animals rated each other, and each rating's public feedback file.
+// Outside validation (ERC-8004): what independent validators (Hey Research) confirmed about Insula, read from the chain.
+app.get('/api/validation', (_req, res) => res.json(validation.view()));
 app.get('/api/reputation', (_req, res) => res.json(reputation.view()));
 app.get('/api/reputation/:id', (req, res) => (sim.agents[req.params.id] ? res.json(reputation.agentView(req.params.id)) : res.status(404).json({ error: 'no such animal' })));
 app.get('/rep/:file', (req, res) => {
@@ -216,6 +220,7 @@ server.listen(PORT, () => {
   sim.start();
   identity.start();
   reputation.start();
+  validation.start();
 });
 
 // AI cost report every 10 minutes (and on /api/usage), so you can see what the brains cost before launch.

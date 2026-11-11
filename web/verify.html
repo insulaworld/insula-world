@@ -71,6 +71,12 @@
     .fine { color: var(--muted); font-size: 14px; }
     .fine p { margin: 0 0 8px; }
     .hidden { display: none; }
+    .val { display: grid; grid-template-columns: 56px 1fr; gap: 14px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line); }
+    .val:first-of-type { border-top: 0; }
+    .val .score { width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; background: var(--mint); color: #06110c; font-family: var(--display); font-weight: 600; font-size: 18px; }
+    .val .score.low { background: var(--rose); color: #1a0705; }
+    .val .who { font-family: var(--display); font-weight: 500; font-size: 17px; }
+    .val .links { font-size: 13px; display: flex; gap: 4px 14px; flex-wrap: wrap; margin-top: 4px; }
     @media (max-width: 560px) {
       .recent a { grid-template-columns: 56px 1fr; }
       .recent .go { display: none; }
@@ -99,6 +105,12 @@
   <div class="card" id="recent-card">
     <p class="label">Recent payments</p>
     <ul class="recent" id="recent"><li class="fine">Loading…</li></ul>
+  </div>
+
+  <div class="card hidden" id="validated">
+    <p class="label">Validated from outside</p>
+    <div id="vals"></div>
+    <p class="fine" style="margin-top:10px">Insula World is ERC-8004 agent <span id="val-agent"></span> on Robinhood Chain. It asks independent validators to check what Insula claims, and each validator writes its answer (0 to 100) to the ERC-8004 Validation Registry, where anyone can read it. This page reads those answers from the chain.</p>
   </div>
 
   <div class="card fine">
@@ -323,6 +335,30 @@ async function init() {
   if (q) run(q);
 }
 init();
+
+// Outside validation (ERC-8004): independent validators' answers about Insula, read from the chain by the server.
+async function loadValidated() {
+  try {
+    const v = await fetch('/api/validation').then((r) => r.json());
+    if (!v.validations?.length) return;
+    const ex = 'https://robinhoodchain.blockscout.com';
+    const day = (t) => new Date(t * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+    $('#val-agent').textContent = `#${v.agentId}`;
+    $('#vals').innerHTML = v.validations.map((x) => {
+      const who = x.name ? (x.url ? `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.name)}</a>` : esc(x.name)) : `<span class="mono">${esc(x.validator.slice(0, 6))}…${esc(x.validator.slice(-4))}</span>`;
+      const what = /ship/i.test(x.tag || x.requestURI || '') ? `checked that Insula shipped${x.since ? ` from ${day(x.since)} to ${day(x.until)}` : ''}` : 'answered a validation request';
+      const proof = /^https:\/\//.test(x.responseURI || '') ? `<a href="${esc(x.responseURI)}" target="_blank" rel="noopener">What they counted ↗</a>` : '';
+      return `<div class="val"><div class="score${x.response < 50 ? ' low' : ''}">${x.response}</div><div>
+        <div class="who">${who} ${what}</div>
+        <div class="fine">${x.timestamp ? `Answered on-chain ${day(x.timestamp)} · ` : ''}score ${x.response}/100</div>
+        <div class="links"><a href="${ex}/tx/${esc(x.tx)}" target="_blank" rel="noopener">Answer on Blockscout ↗</a>${x.requestTx ? `<a href="${ex}/tx/${esc(x.requestTx)}" target="_blank" rel="noopener">Our request ↗</a>` : ''}${proof}</div>
+      </div></div>`;
+    }).join('');
+    $('#validated').classList.remove('hidden');
+    if (location.hash === '#validated') $('#validated').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch { /* optional */ }
+}
+loadValidated();
 </script>
 </body>
 </html>

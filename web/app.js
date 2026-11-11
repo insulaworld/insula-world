@@ -2556,3 +2556,21 @@ function frame() {
   requestAnimationFrame(frame);
 }
 frame();
+
+// Outside validation: once an independent validator (Hey Research) has answered Insula's ERC-8004 validation
+// request on-chain, a badge in the header links to the details on /verify. Read by the server from the chain.
+async function loadValidation() {
+  try {
+    const v = await fetch('/api/validation').then((r) => r.json());
+    const best = (v.validations || []).find((x) => x.response >= 50);
+    const el = document.getElementById('valid-link');
+    if (!best || !el) return;
+    const narrow = window.innerWidth < 600;
+    const when = (t) => new Date(t * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+    el.textContent = narrow ? `✓ ${best.response}` : `✓ VALIDATED ${best.response}/100`;
+    el.title = `${best.name || 'An outside validator'} checked on-chain that Insula shipped${best.since ? ` (${when(best.since)} to ${when(best.until)})` : ''}: ${best.response}/100. ERC-8004 validation on Robinhood Chain.`;
+    el.hidden = false;
+  } catch { /* the badge is optional */ }
+}
+loadValidation();
+setInterval(loadValidation, 30 * 60_000);

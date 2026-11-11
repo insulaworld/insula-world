@@ -619,3 +619,7 @@ body.walking #scene canvas { touch-action: none; }
 .rep-list .rep-v { font-size: 16px; font-weight: 600; text-align: right; }
 .rep-list p { margin: 0 0 2px; font-size: 12px; } .rep-list .who { font-weight: 600; }
 .rep-list span.mono { font-size: 10px; color: var(--muted); line-height: 1.45; }
+
+/* Outside validation (ERC-8004): shown once a validator such as Hey Research has answered on-chain */
+a#valid-link { color: #10131a; background: var(--mint); border-color: transparent; font-weight: 600; text-decoration: none; }
+a#valid-link:hover { filter: brightness(1.08); }
