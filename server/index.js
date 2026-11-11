@@ -14,6 +14,7 @@ import { Reputation } from './reputation.js';
 import { Validation } from './validation.js';
 import { mountMcp } from './mcp.js';
 import { X402 } from './x402.js';
+import { Credit } from './credit.js';
 import { Sim } from './sim.js';
 import { llmStats, llmUsage } from './brain.js';
 import { DEFAULT_DAY_MS } from './eras.js';
@@ -383,8 +384,13 @@ app.get('/leaderboard', (_req, res) => res.sendFile(path.resolve('web/leaderboar
 
 // The Insula MCP server (read-only): any AI agent or app can plug in at /mcp to check on-chain reputation,
 // read prices and news, look up decisions and verify payments. /mcp-info is the how-to page for people.
+// Credit history (each animal's loans, repayments and defaults) for agent-credit protocols and anyone pricing risk.
+const credit = new Credit(sim, identity, reputation);
+const creditId = (q) => { const s = String(q).trim().replace(/^#/, '').toLowerCase(); const a = sim.state().agents.find((x) => x.id === s || x.name.toLowerCase() === s || String(x.erc8004?.agentId ?? '') === s || String(x.address ?? '').toLowerCase() === s); return a?.id || null; };
+app.get('/api/credit', (_req, res) => { res.set('Access-Control-Allow-Origin', '*'); res.json(credit.all()); });
+app.get('/api/credit/:agent', (req, res) => { res.set('Access-Control-Allow-Origin', '*'); const id = creditId(req.params.agent); return id ? res.json(credit.report(id)) : res.status(404).json({ error: 'No animal matches that.' }); });
 const x402 = new X402(sim, SAVE.replace(/\.json$/, '') + '.x402.json'); // paid MCP calls past the free allowance (X402_PAY_TO)
-mountMcp(app, { sim, reputation, validation, identity, relations, leaderboard, findDecision, x402 });
+mountMcp(app, { sim, reputation, validation, identity, relations, leaderboard, findDecision, x402, credit });
 app.get('/mcp-info', (_req, res) => res.sendFile(path.resolve('web/mcp.html')));
 
 sim.on((e) => { if (e.type === 'chainError') chainErrors++; });

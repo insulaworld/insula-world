@@ -1252,7 +1252,7 @@ export class Sim {
       if (ok.decision !== 'accept' || this.chain.balance(banker.id) < terms.amount) return;
       const text = `${banker.name} lent ${agent.name} ${terms.amount} coins at ${Math.round(terms.rate * 100)}% (${owed} due)`;
       const res = await this.#pay(banker.id, agent.id, terms.amount, text, { by: agent });
-      this.loans.push({ id: this.nextId++, borrower: agent.id, lender: banker.id, principal: terms.amount, rate: terms.rate, owed, due: Date.now() + LOAN.termMs, issued: Date.now(), status: 'open' });
+      this.loans.push({ id: this.nextId++, borrower: agent.id, lender: banker.id, principal: terms.amount, rate: terms.rate, owed, due: Date.now() + LOAN.termMs, issued: Date.now(), status: 'open', tx: res?.url || res?.sig || null });
       agent.remember(`borrowed ${terms.amount} from ${banker.name}, owe ${owed}`);
       banker.remember(`lent ${terms.amount} to ${agent.name} at ${Math.round(terms.rate * 100)}%`);
       this.#record(null, 0, terms.amount);
@@ -1275,7 +1275,7 @@ export class Sim {
       agent.speak(brain.pick(['Here. Paid in full.', 'Settling up.', 'Your coins, with interest.']));
       const text = `${agent.name} repaid ${banker.name} ${loan.owed} coins (${loan.owed - loan.principal} interest)`;
       const res = await this.#pay(agent.id, banker.id, loan.owed, text, { by: agent });
-      loan.status = 'repaid';
+      loan.status = 'repaid'; loan.closed = Date.now(); loan.paid = loan.owed; loan.repayTx = res?.url || res?.sig || null;
       const c = (this.credit[agent.id] ||= { repaid: 0, defaulted: 0 });
       c.repaid++;
       this.#record(null, 0, loan.owed);
@@ -1304,8 +1304,10 @@ export class Sim {
           const res = await this.#pay(who.id, banker.id, take, text, { rule: 'collection' });
           this.emit({ type: 'trade', kind: full ? 'repay' : 'default', from: who.id, to: banker.id, amount: take, text, ...res });
           loan.status = full ? 'repaid' : 'defaulted';
+          Object.assign(loan, { late: true, closed: Date.now(), paid: take, repayTx: res?.url || res?.sig || null }); // collected after the due date
         } else {
           loan.status = 'defaulted';
+          Object.assign(loan, { late: true, closed: Date.now(), paid: 0 });
           this.log(`${who.name} defaulted on ${loan.owed} coins owed to ${banker.name}.`);
           this.emit({ type: 'credit', kind: 'default', from: who.id, to: banker.id, owed: loan.owed });
         }

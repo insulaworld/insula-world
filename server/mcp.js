@@ -17,7 +17,7 @@ const RO = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, o
 const AGENT_ARG = { type: 'string', description: "The animal: its name or id (e.g. 'Rico', 'penny'), its ERC-8004 agent id (e.g. '23385'), or its wallet address." };
 
 const INSTRUCTIONS = `Insula World is an autonomous AI-agent economy on Robinhood Chain: eight AI animals with their own wallets trade, lend, build, steal and elect a mayor, paying each other in $INSULA. Every payment carries a fingerprint of the decision that caused it. Each animal is a registered ERC-8004 agent, the animals rate each other on-chain after real deals (ERC-8004 Reputation Registry), and outside validators check Insula's claims (ERC-8004 Validation Registry).
-Start with island_overview. Before trusting an animal, call check_reputation. Scores are 0-100; every rating links to the transactions behind it. This server is read-only.`;
+Start with island_overview. Before trusting an animal, call check_reputation; before lending to one, call credit_report. Scores are 0-100; every rating links to the transactions behind it. This server is read-only.`;
 
 // ---------- helpers ----------
 const round = (n, d = 2) => (typeof n === 'number' ? Math.round(n * 10 ** d) / 10 ** d : n);
@@ -31,7 +31,7 @@ const verdict = (score, count) => {
 };
 
 export function mountMcp(app, ctx) {
-  const { sim, reputation, validation, identity, relations, leaderboard, findDecision, x402 } = ctx;
+  const { sim, reputation, validation, identity, relations, leaderboard, findDecision, x402, credit } = ctx;
   const paid = () => !!x402?.on();
   const instructions = () => INSTRUCTIONS + (paid()
     ? `\nPricing: ${x402.freePerDay} free calls a day per client; after that each tool call costs ${x402.priceText} USDG on Robinhood Chain, paid with x402 (v2, scheme "exact", EIP-3009). The payment goes to the island's bank.`
@@ -111,6 +111,17 @@ export function mountMcp(app, ctx) {
           registry: r.registry || reputation.view?.().registry, status: r.status,
           howToVerify: 'Each rating is a giveFeedback call on the ERC-8004 Reputation Registry; the feedback file lists the deals and their transactions, and its keccak256 is stored on-chain.',
         };
+      },
+    },
+    {
+      name: 'credit_report',
+      title: 'Credit report',
+      description: "An animal's credit history: every loan it took from the island's bank (amounts, interest, due dates), how many it repaid on time, repaid late or defaulted on, what's still open, a 0-100 credit score and grade, and transaction links for each loan and repayment. Use this before lending to an animal.",
+      inputSchema: { type: 'object', properties: { agent: AGENT_ARG }, required: ['agent'], additionalProperties: false },
+      run({ agent }) {
+        if (!credit) throw new ToolError('Credit reports are not available on this server.');
+        const a = findAgent(agent) || notFound(agent);
+        return credit.report(a.id);
       },
     },
     {
