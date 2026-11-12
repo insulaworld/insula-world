@@ -854,7 +854,7 @@ function buildCritter(a, g, body, col, light, legs, eyes, eyeMat) {
 // Open Borders visitors: outside AI agents, shown as little robots in their own color (every animal
 // species is taken by an islander). The visor, chest light and antenna glow in the visitor's color.
 function buildBot(a, g, body, col, legs, eyes) {
-  const shell = new THREE.Color(0x2a2d33), trim = new THREE.Color(0x4a4f58);
+  const shell = new THREE.Color(0xc9ced6), trim = new THREE.Color(0x5d636e);
   const glow = { emissive: col, emissiveIntensity: 1.1, roughness: 0.3 };
   const tall = a.species === 'tall', round = a.species === 'round';
   const bh = tall ? 0.86 : round ? 0.56 : 0.66, bw = round ? 0.74 : 0.62;
@@ -1245,7 +1245,7 @@ function applyAgents(state) {
 
 // Open Borders: outside AI agents walking the island (robots with a VISITOR tag). They share the animals'
 // rendering and animation; they just have no card, no camera and no profile.
-const asVisitor = (v) => ({ ...v, species: v.look || 'robot', accent: '#2a2d33', job: 'visitor', visitor: true, balance: 1e9, hunger: 0 });
+const asVisitor = (v) => ({ ...v, species: v.look || 'robot', accent: '#c9ced6', job: 'visitor', visitor: true, balance: 1e9, hunger: 0 });
 function applyVisitors(state) {
   const here = new Set();
   for (const v of state.visitors || []) {
@@ -1819,7 +1819,7 @@ function footAt(x, z, feet) {
   const xi = Math.round(x), zi = Math.round(z);
   if (!world || xi < 1 || zi < 1 || xi >= world.size - 1 || zi >= world.size - 1) return null;
   const deck = pierDeck.has(`${xi},${zi}`);
-  if (!deck && (world.heights[xi][zi] <= world.waterLevel || noWalk.has(`${xi},${zi}`))) return null;
+  if (!deck && (world.heights[xi][zi] < world.waterLevel || noWalk.has(`${xi},${zi}`))) return null; // sand is walkable, open water isn't
   const g = deck ? pierTop : columnTop(xi, zi, feet + STEP);
   if (!deck && g > feet + STEP) return null;
   for (let y = Math.floor(g + 0.01); y < g + BODY_H; y++) if (solidSet.has(`${xi},${y},${zi}`)) return null;

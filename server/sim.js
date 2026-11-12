@@ -603,7 +603,7 @@ export class Sim {
   #dry(x, z) {
     const w = this.world, xi = Math.round(x), zi = Math.round(z);
     if (xi < 0 || zi < 0 || xi >= w.size || zi >= w.size) return false;
-    return w.heights[xi][zi] > w.waterLevel || Boolean(w.places?.dock?.pier?.tiles.some(([a, b]) => a === xi && b === zi));
+    return w.heights[xi][zi] >= w.waterLevel || Boolean(w.places?.dock?.pier?.tiles.some(([a, b]) => a === xi && b === zi)); // sand beach counts as dry
   }
 
   // Land or pier, not open water, and not inside a building.
@@ -611,7 +611,7 @@ export class Sim {
     const w = this.world, xi = Math.round(x), zi = Math.round(z);
     if (xi < 0 || zi < 0 || xi >= w.size || zi >= w.size) return false;
     if (this.#insideSolid(x, z)) return false;
-    if (w.heights[xi][zi] > w.waterLevel) return true;
+    if (w.heights[xi][zi] >= w.waterLevel) return true; // grass or sand beach; only open water is off-limits
     return Boolean(w.places?.dock?.pier?.tiles.some(([a, b]) => a === xi && b === zi));
   }
 

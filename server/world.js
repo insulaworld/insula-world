@@ -165,18 +165,24 @@ export function generateWorld({ seed = 1337 } = {}) {
     }
   plots.sort((a, b) => a.d - b.d);
 
+  // Everything above is the original island, generated exactly as before so saved buildings, plots and
+  // trees stay where they are. The coast expansion below only turns open sea into new land and beach.
+  const pier = pierLayout(heights, WATER_LEVEL, dock);
+  const grown = expandCoast({ seed, heights, size, pier, sites, rand: mulberry32(seed ^ 0x51ab1e), market, trees, plots, zoneOf });
+
   return {
-    size,
+    size: grown.size,
     seed,
     waterLevel: WATER_LEVEL,
-    heights,
+    heights: grown.heights,
     places: {
       market: { ...market, label: 'Market' },
       mine: { ...mine, label: 'Mine' },
-      dock: { x: dock.x, z: dock.z, waterX: dock.waterX, waterZ: dock.waterZ, label: 'Dock', pier: pierLayout(heights, WATER_LEVEL, dock) },
+      dock: { x: dock.x, z: dock.z, waterX: dock.waterX, waterZ: dock.waterZ, label: 'Dock', pier },
       farm: { x: fields.x, z: fields.z, label: 'Farm Valley', zone: 'farm' },
       mine2: { ...mine2, label: 'West Hill Quarry', zone: 'west' },
       beach: { ...beach, label: 'North Beach', zone: 'north' },
+      meadow: { ...grown.meadow, label: 'South Meadow' },
     },
     zones: Object.fromEntries(Object.entries(ZONE_DEFS).map(([k, v]) => [k, { id: k, label: v.label, cx: v.cx ?? market.x, cz: v.cz ?? market.z, r: v.r ?? 24 }])),
     fields,
@@ -186,6 +192,86 @@ export function generateWorld({ seed = 1337 } = {}) {
     trees,
     plots,
   };
+}
+
+// Size of the map after the coast expansion. The original island used 88x88; the map grows to the east and
+// south only, so every existing coordinate keeps its meaning.
+export const MAP_SIZE = 100;
+export const MEADOW = { cx: 52, cz: 72, r: 10.5 };
+
+// Grows the island by about a quarter: a wider coastline all round (where there's open sea, away from the
+// pier and the North Beach harbor) plus a new South Meadow, each edged with a fresh sand beach. Only tiles
+// that were sea or beach change. New trees and building plots for the new land are appended to the lists.
+function expandCoast({ seed, heights: old, size: oldSize, pier, sites, rand, market, trees, plots, zoneOf }) {
+  const size = MAP_SIZE;
+  const noise = valueNoise(size, 6, rand);
+  const heights = Array.from({ length: size }, (_, x) => Array.from({ length: size }, (_, z) => old[x]?.[z] ?? 0));
+  const wasLand = (x, z) => (old[x]?.[z] ?? 0) > WATER_LEVEL;
+  // Distance from each tile to the nearest original land tile (brute force over the coast only).
+  const coast = [];
+  for (let x = 0; x < oldSize; x++) for (let z = 0; z < oldSize; z++) {
+    if (!wasLand(x, z)) continue;
+    if ([[1, 0], [-1, 0], [0, 1], [0, -1]].some(([a, b]) => !wasLand(x + a, z + b))) coast.push([x, z]);
+  }
+  const pierTiles = pier.tiles;
+  const end = pierTiles[pierTiles.length - 1];
+  const keepSea = (x, z) =>
+    pierTiles.some(([a, b]) => Math.hypot(a - x, b - z) < 5) ||
+    Math.hypot(x - end[0], z - end[1]) < 9 ||
+    (Math.abs(x - sites.harbor.x) < 7 && z < sites.harbor.z + 1);
+  const edge = 3; // open water kept around the map's border
+  const M = MEADOW;
+  for (let x = edge; x < size - edge; x++)
+    for (let z = edge; z < size - edge; z++) {
+      if (wasLand(x, z) || keepSea(x, z)) continue;
+      const n = noise(x, z);
+      let d = 99;
+      for (const [cx, cz] of coast) { const dd = Math.hypot(x - cx, z - cz); if (dd < d) d = dd; }
+      const R = 2.0 + n * 2.2; // how far the new shore reaches here
+      const md = Math.hypot((x - M.cx) / M.r, (z - M.cz) / (M.r * (z < M.cz ? 1.45 : 1))); // South Meadow, a low lobe joined to the main island
+      let h = 0;
+      if (d <= R - 1.2) h = 2 + (n > 0.62 && d < R - 2.6 ? 1 : 0);
+      else if (d <= R + 0.6) h = 1;
+      if (md < 1) h = Math.max(h, Math.round((1 - Math.pow(md, 2.2)) * (2.2 + n * 1.6)) + 1);
+      else if (md < 1.12) h = Math.max(h, 1);
+      heights[x][z] = Math.max(heights[x][z], h);
+    }
+  // Smooth single-tile spikes and holes on the new land so it walks well.
+  for (let x = edge; x < size - edge; x++)
+    for (let z = edge; z < size - edge; z++) {
+      if (wasLand(x, z) || heights[x][z] <= WATER_LEVEL) continue;
+      const ns = [heights[x + 1][z], heights[x - 1][z], heights[x][z + 1], heights[x][z - 1]];
+      const hi = Math.max(...ns);
+      if (heights[x][z] > hi) heights[x][z] = hi;
+    }
+
+  // New trees and plots on the new land only, so the original ones never move.
+  const isNew = (x, z) => !wasLand(x, z) && heights[x][z] > WATER_LEVEL;
+  for (let i = 0; i < 900 && trees.length < 44; i++) {
+    const x = edge + Math.floor(rand() * (size - 2 * edge)), z = edge + Math.floor(rand() * (size - 2 * edge));
+    if (!isNew(x, z) || Math.hypot(x - market.x, z - market.z) < 10) continue;
+    if (Math.hypot(x - MEADOW.cx, z - MEADOW.cz) < MEADOW.r * 0.8) continue; // the meadow stays open ground for visitors
+    if (trees.some((t) => Math.hypot(t.x - x, t.z - z) < 3.3)) continue;
+    trees.push({ x, z, h: 3 + Math.floor(rand() * 2) });
+  }
+  const meadow = { x: M.cx, z: M.cz };
+  const added = [];
+  for (let x = edge + 1; x < size - edge - 1; x++)
+    for (let z = edge + 1; z < size - edge - 1; z++) {
+      const hs = [];
+      let fresh = false;
+      for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) { hs.push(heights[x + dx][z + dz]); fresh ||= isNew(x + dx, z + dz); }
+      const lo = Math.min(...hs), hi = Math.max(...hs);
+      if (!fresh || lo <= WATER_LEVEL || hi - lo > 1) continue;
+      if (Math.hypot(x - meadow.x, z - meadow.z) < 3) continue; // keep the meadow's heart open for visitors
+      if (trees.some((t) => Math.hypot(t.x - x, t.z - z) < 2.6)) continue;
+      if ([...plots, ...added].some((p) => Math.hypot(p.x - x, p.z - z) < 4.4)) continue;
+      const zone = zoneOf(x, z);
+      added.push({ x, z, y: hi, zone, d: 100 + Math.hypot(x - market.x, z - market.z) });
+    }
+  added.sort((a, b) => a.d - b.d);
+  plots.push(...added);
+  return { size, heights, meadow };
 }
 
 export function zoneAt(world, x, z) {
