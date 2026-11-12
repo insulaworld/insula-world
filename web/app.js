@@ -851,6 +851,37 @@ function buildCritter(a, g, body, col, light, legs, eyes, eyeMat) {
   addTools(g, body, { x: bw * 0.6, y: by + 0.24, z: 0.3 });
 }
 
+// Open Borders visitors: outside AI agents, shown as little robots in their own color (every animal
+// species is taken by an islander). The visor, chest light and antenna glow in the visitor's color.
+function buildBot(a, g, body, col, legs, eyes) {
+  const shell = new THREE.Color(0x2a2d33), trim = new THREE.Color(0x4a4f58);
+  const glow = { emissive: col, emissiveIntensity: 1.1, roughness: 0.3 };
+  const tall = a.species === 'tall', round = a.species === 'round';
+  const bh = tall ? 0.86 : round ? 0.56 : 0.66, bw = round ? 0.74 : 0.62;
+  const by = 0.38 + bh / 2;
+  body.add(part(bw, bh, 0.5, shell, 0, by, 0, { roughness: 0.45, metalness: 0.4 }));
+  body.add(part(bw * 0.5, 0.14, 0.04, col, 0, by + 0.06, 0.26, glow)); // chest light
+  body.add(part(bw + 0.06, 0.08, 0.56, trim, 0, by - bh / 2 + 0.06, 0, { metalness: 0.5 }));
+  const head = new THREE.Group();
+  head.position.set(0, by + bh / 2 + 0.26, 0.02);
+  head.add(part(round ? 0.6 : 0.54, 0.44, 0.48, shell, 0, 0, 0, { roughness: 0.45, metalness: 0.4 }));
+  const visor = part(round ? 0.46 : 0.42, 0.14, 0.04, col, 0, 0.02, 0.25, glow);
+  head.add(visor);
+  eyes.push(visor);
+  head.add(part(0.04, 0.26, 0.04, trim, 0, 0.34, 0), part(0.1, 0.1, 0.1, col, 0, 0.5, 0, glow)); // antenna
+  for (const x of [-0.3, 0.3]) head.add(part(0.06, 0.16, 0.16, trim, x, 0, 0));
+  body.add(head);
+  g.userData.head = head;
+  for (const x of [-bw * 0.26, bw * 0.26]) {
+    const leg = new THREE.Group();
+    leg.position.set(x, 0.4, 0);
+    leg.add(part(0.16, 0.4, 0.18, trim, 0, -0.2, 0, { metalness: 0.5 }), part(0.2, 0.08, 0.26, shell, 0, -0.38, 0.03));
+    body.add(leg);
+    legs.push(leg);
+  }
+  addTools(g, body, { x: bw / 2 + 0.08, y: by + 0.1, z: 0.25 });
+}
+
 function buildAnimal(a) {
   const g = new THREE.Group();
   const body = new THREE.Group();
@@ -861,7 +892,9 @@ function buildAnimal(a) {
   const eyes = [];
   const eyeMat = { roughness: 0.2 };
 
-  if (a.species === 'bear') {
+  if (a.visitor) {
+    buildBot(a, g, body, col, legs, eyes);
+  } else if (a.species === 'bear') {
     body.add(part(0.95, 0.78, 1.15, col, 0, 0.78, 0));
     body.add(part(0.7, 0.5, 0.8, light, 0, 0.66, 0.12));
     const head = new THREE.Group();
@@ -1114,12 +1147,12 @@ function ensureAgent(a) {
   bubble.className = 'bubble';
   bubble.hidden = true;
   const tag = document.createElement('div');
-  tag.className = 'tag';
+  tag.className = a.visitor ? 'tag visitor' : 'tag';
   tag.textContent = a.name;
   $('#bubbles').append(bubble, tag);
   const card = document.createElement('div');
   card.className = 'card';
-  $('#agents').appendChild(card);
+  if (!a.visitor) $('#agents').appendChild(card); // visitors have no card in the islanders' panel
   const rec = { group, bubble, tag, card, data: a, pos: new THREE.Vector3(a.x, a.y, a.z), heading: a.heading, lastSay: null, lastInv: { ...a.inv }, cardHtml: '' };
   group.position.copy(rec.pos);
   agents.set(a.id, rec);
@@ -1153,6 +1186,7 @@ function applyState(state) {
   syncZones(state);
   renderRoadmap(state);
   applyAgents(state);
+  applyVisitors(state);
   const preview = state.chain.cluster === 'preview';
   const mode = $('#mode');
   const narrow = matchMedia('(max-width: 600px)').matches;
@@ -1206,6 +1240,28 @@ function applyAgents(state) {
     for (const o of owns) tags.push(`<span class="prop">${o}</span>`);
     rec.extras = tags.length ? `<div class="chips tags">${tags.join('')}</div>` : '';
     renderCard(rec);
+  }
+}
+
+// Open Borders: outside AI agents walking the island (robots with a VISITOR tag). They share the animals'
+// rendering and animation; they just have no card, no camera and no profile.
+const asVisitor = (v) => ({ ...v, species: v.look || 'robot', accent: '#2a2d33', job: 'visitor', visitor: true, balance: 1e9, hunger: 0 });
+function applyVisitors(state) {
+  const here = new Set();
+  for (const v of state.visitors || []) {
+    here.add(v.id);
+    const rec = ensureAgent(asVisitor(v));
+    const prev = rec.data;
+    rec.data = { ...asVisitor(v), x: prev?.visitor && rec.tickAt ? prev.x : v.x, z: prev?.visitor && rec.tickAt ? prev.z : v.z };
+    if (!rec.tickAt) Object.assign(rec.data, { x: v.x, z: v.z });
+    rec.tag.classList.toggle('leaving', v.status === 'leaving');
+  }
+  for (const [id, rec] of agents) {
+    if (!rec.data.visitor || here.has(id)) continue;
+    scene.remove(rec.group);
+    rec.tag.remove();
+    rec.bubble.remove();
+    agents.delete(id);
   }
 }
 
@@ -1639,6 +1695,15 @@ function applyTick(msg) {
       rec.tickAt = now;
     }
   }
+  // Visitors (Open Borders): position, heading and what they're doing.
+  for (const [id, x, z, y, heading, moving, task, activity] of msg.v || []) {
+    const rec = agents.get(id);
+    if (!rec?.data.visitor) continue;
+    const a = rec.data, dt = rec.tickAt ? (now - rec.tickAt) / 1000 : 0;
+    rec.vel = moving && dt > 0.05 && dt < 1 ? { x: (x - a.x) / dt, z: (z - a.z) / dt } : null;
+    rec.tickAt = now;
+    Object.assign(a, { x, z, y, heading, moving: !!moving, task, activity });
+  }
   applyAgents(latest);
 }
 
@@ -1854,6 +1919,7 @@ function animalAt(ndc) {
   raycaster.far = 12;
   let best = null;
   for (const [id, rec] of agents) {
+    if (rec.data.visitor) continue;
     const hit = raycaster.intersectObject(rec.group, true)[0];
     if (hit && (!best || hit.distance < best.d)) best = { id, d: hit.distance, name: rec.data.name };
   }

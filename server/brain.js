@@ -641,6 +641,17 @@ export async function respond(agent, proposer, side, item, qty, price, ctx) {
   return rule;
 }
 
+// Open Borders: would this animal take a visitor's posted offer as it stands? Posted offers are take it or
+// leave it, judged by the same valuation rules the animal uses on its neighbors' offers, and only on numbers:
+// what the visitor says never reaches the animal or its AI. `buying` = the animal would be the buyer.
+export function judgeOffer(agent, ctx, buying, item, qty, price) {
+  if (buying && ctx.self.coins < qty * price + 50) return { ok: false, thought: `${qty * price} coins is more than I can spare.` };
+  if (!buying && (ctx.self.inv[item] || 0) < qty) return { ok: false, thought: `I don't have ${qty} ${item}.` };
+  if (!buying && ctx.role === 'builder' && ctx.myJobs?.some((j) => (j[item] || 0) > 0)) return { ok: false, thought: `My ${item} is for a job.` };
+  const r = ruleRespond(agent, buying, item, price, ctx);
+  return { ok: r.decision === 'accept', thought: r.thought };
+}
+
 function ruleRespond(agent, buying, item, price, ctx, grudge = false) {
   const p = PRICES[item];
   // With someone you don't trust you buy cheaper and sell dearer.

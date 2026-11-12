@@ -7,7 +7,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { JsonRpcProvider, Wallet, Contract, Interface, Transaction, parseUnits, formatUnits, toUtf8Bytes, hexlify, concat } from 'ethers';
+import { JsonRpcProvider, Wallet, Contract, Interface, Transaction, parseUnits, formatUnits, toUtf8Bytes, hexlify, concat, isAddress, getAddress } from 'ethers';
 
 export const ERC20_ABI = [
   'function transfer(address to, uint256 amount) returns (bool)',
@@ -60,6 +60,7 @@ export class EvmChain {
     this.explorer = cfg.explorer ?? net.explorer ?? '';
     this.explorerName = cfg.explorerName || net.explorerName || 'Explorer';
     this.decimals = cfg.decimals;
+    this.chainId = cfg.chainId ?? net.chainId;
     this.tokenAddress = cfg.token;
     this.symbol = cfg.symbol || 'INSULA';
     this.buyUrl = cfg.buyUrl || null;
@@ -113,7 +114,7 @@ export class EvmChain {
     return job;
   }
 
-  addressOf(id) { return this.wallets[id].address; }
+  addressOf(id) { return this.wallets[id]?.address ?? (isAddress(id) ? getAddress(id) : undefined); }
   accountUrl(id) { return this.explorer ? `${this.explorer}/address/${this.addressOf(id)}` : null; }
   txUrl(hash) { return this.explorer ? `${this.explorer}/tx/${hash}` : null; }
   balance(id) { return this.balances[id] ?? 0; }
@@ -221,6 +222,22 @@ export class EvmChain {
     throw new Error('gas stayed above the ceiling for 15 minutes');
   }
 
+  // Open Borders: coins that arrived in an island wallet from outside (a visitor's Permit2 transfer).
+  credit(id, amount) { if (this.wallets[id]) this.balances[id] = (this.balances[id] ?? 0) + amount; }
+
+  // Open Borders: the bank sends a new visitor a little ETH so it can send its own few transactions
+  // (approving Permit2, leaving). Queued like a payment, under the same gas ceiling.
+  sendGas(to, wei) {
+    const job = this.queue.then(async () => {
+      await this.#waitForCheapGas();
+      if ((this.eth.bank ?? 0n) < wei * 20n) throw new Error('the bank is low on ETH for gas');
+      const hash = await this.#sendTx('bank', { to: getAddress(to), value: wei });
+      return { sig: hash, url: this.txUrl(hash) };
+    });
+    this.queue = job.catch(() => {});
+    return job;
+  }
+
   // A contract call from one of the wallets (e.g. registering an agent identity). Queued like a payment,
   // with the same gas ceiling and bank top-up. Returns the receipt, so callers can read its events.
   contractCall(from, to, data) {
@@ -240,7 +257,10 @@ export class EvmChain {
     await this.#waitForCheapGas();
     await this.#ensureGas(from);
     const raw = parseUnits(Number(amount).toFixed(Math.min(6, this.decimals)), this.decimals);
-    const data = transferData(this.wallets[to].address, raw, this.useMemo ? memo : null);
+    // `to` is one of the island's wallets, or (Open Borders) a visitor's own 0x address.
+    const toAddr = this.wallets[to]?.address ?? (isAddress(to) ? getAddress(to) : null);
+    if (!toAddr) throw new Error(`unknown recipient ${to}`);
+    const data = transferData(toAddr, raw, this.useMemo ? memo : null);
     const hash = await this.#sendTx(from, { to: this.tokenAddress, data });
     this.balances[from] -= amount;
     this.balances[to] = (this.balances[to] ?? 0) + amount;

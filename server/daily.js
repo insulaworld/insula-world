@@ -78,7 +78,7 @@ export class Reporter {
             g.qty += e.qty || 0; g.coins += amt; g.deals++;
           }
       }
-      if (!['income', 'tax', 'fine', 'relief', 'treasury'].includes(e.kind)) {
+      if (!['income', 'tax', 'fine', 'relief', 'treasury', 'entry'].includes(e.kind)) {
         a.trades++;
         a.volume += amt;
         if (!a.biggest || amt > a.biggest.amount) a.biggest = { amount: amt, text: e.text, kind: e.kind, from: e.from, to: e.to };

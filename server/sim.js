@@ -46,7 +46,7 @@ function canonical(rec) {
   return JSON.stringify({ id, agent, at, day, brain, saw, options, choice, qty, price, thought, said, steps: rec.steps.slice() });
 }
 
-class Agent {
+export class Agent {
   constructor(def, sim, pos) {
     Object.assign(this, def);
     this.sim = sim;
@@ -252,6 +252,8 @@ export class Sim {
     this.daily = new Reporter(this, saved?.daily);
     this.election = new Election(this, saved?.election);
     this.shippedAt = Date.now();
+    this.savedVisitors = saved?.visitors || null; // Open Borders: outside agents (see visitors.js)
+    this.visitors = null;
     this.agents = {};
     const m = world.places.market;
     const savedAgents = Object.fromEntries((saved?.agents || []).map((a) => [a.id, a]));
@@ -320,6 +322,15 @@ export class Sim {
 
   // An automatic payment under a named rule (the election's treasury handover, theft relief).
   rulePayment(from, to, amount, text, rule) { return this.#pay(from, to, amount, text, { rule }); }
+
+  // ---------- For Open Borders (visitors.js) ----------
+  // An animal's payment under its current decision (sealed and fingerprinted like any other), e.g. buying from a visitor.
+  payByDecision(agent, from, to, amount, text) { return this.#pay(from, to, amount, text, { by: agent }); }
+  recordTrade(item, price, amount) { this.#record(item, price, amount); }
+  noteShipped(item, n) { this.#fadeGlut(); this.shipped[item] += n; }
+  workSpot(who, item) { return this.#spotFor(who, item); }
+  dockSpot(who) { return this.#dockSpot(who); }
+  chainError(e, what) { this.#chainError(e, what); }
 
   #release(a, b) {
     a.engaged = b.engaged = false;
@@ -420,6 +431,7 @@ export class Sim {
     return {
       version: 2,
       genesis: this.genesis, started: this.started, savedAt: Date.now(),
+      visitors: this.visitors ? this.visitors.save() : this.savedVisitors || undefined,
       market: this.market, decisions: this.decisions, loans: this.loans, jobs: this.jobs, buildings: this.buildings,
       credit: this.credit, nextId: this.nextId, unlocked: [...this.unlocked], projects: this.projects,
       lastTaxDay: this.lastTaxDay, stats: this.stats, takenPlots: [...this.takenPlots], shipped: this.shipped, decisionSeq: this.decisionSeq,
@@ -461,6 +473,7 @@ export class Sim {
         taxes: this.stats.taxes,
       },
       election: this.election.view(),
+      visitors: this.visitors ? this.visitors.view() : [],
     };
   }
 
@@ -667,7 +680,9 @@ export class Sim {
         agent.task = 'thinking';
         const options = this.#options(agent);
         const ctx = this.context(agent);
-        const d = await brain.decide(agent, ctx, options);
+        // Open Borders: a visitor's posted offer is judged by the animal's own valuation rules (numbers only,
+        // never the visitor's words), before the AI is asked anything.
+        const d = this.visitors?.consider(agent, ctx) || await brain.decide(agent, ctx, options);
         agent.thinking = false;
         this.decisions++;
         // Neighbor trades come in lots of at least MIN_LOT; settle the size here so the record matches the deal.
@@ -854,6 +869,7 @@ export class Sim {
       case 'build': return 'BUILD';
       case 'donate': case 'fund': return `${o.action.toUpperCase()} ${d.qty} → ${PROJECTS[o.project].label.toUpperCase()}`;
       case 'steal': return `STEAL ${o.item.toUpperCase()} ← ${o.withName.toUpperCase()}`;
+      case 'vfill': return `${o.offer.side === 'sell' ? 'BUY' : 'SELL'} ${o.offer.qty} ${o.offer.item.toUpperCase()} ${o.offer.side === 'sell' ? '←' : '→'} VISITOR ${o.offer.by}`;
       default: return `${o.action.toUpperCase()} ${d.qty} ${o.item.toUpperCase()} ${o.action === 'sell' ? '→' : '←'} ${o.withName.toUpperCase()}`;
     }
   }
@@ -875,6 +891,7 @@ export class Sim {
       case 'build': return this.#build(agent, this.jobs.find((j) => j.id === o.job));
       case 'donate': case 'fund': return this.#donate(agent, o.project, d.qty);
       case 'steal': return this.#steal(agent, this.agents[o.with], o.item, d.qty);
+      case 'vfill': return this.visitors?.fill(agent, o.offer);
       default: return this.#rest(agent);
     }
   }

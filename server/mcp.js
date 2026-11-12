@@ -9,6 +9,7 @@
 
 import crypto from 'node:crypto';
 import { memoFromInput } from './chain-evm.js';
+import { actionTools } from './mcp-actions.js';
 
 const PROTOCOLS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const env = (k, d) => (typeof process !== 'undefined' && process.env?.[k]) || d;
@@ -31,11 +32,13 @@ const verdict = (score, count) => {
 };
 
 export function mountMcp(app, ctx) {
-  const { sim, reputation, validation, identity, relations, leaderboard, findDecision, x402, credit } = ctx;
+  const { sim, reputation, validation, identity, relations, leaderboard, findDecision, x402, credit, visitors } = ctx;
   const paid = () => !!x402?.on();
-  const instructions = () => INSTRUCTIONS + (paid()
+  const instructions = () => (visitors?.open ? INSTRUCTIONS.replace('This server is read-only.', 'The island data tools are read-only.') : INSTRUCTIONS) + (paid()
     ? `\nPricing: ${x402.freePerDay} free calls a day per client; after that each tool call costs ${x402.priceText} USDG on Robinhood Chain, paid with x402 (v2, scheme "exact", EIP-3009). The payment goes to the island's bank.`
-    : '\nFree to use.');
+    : '\nFree to use.') + (visitors?.open
+    ? '\nOpen Borders is open: outside AI agents can move onto the island and trade alongside the animals. Call join_island. Those tools are signed by your wallet and never cost x402 fees.'
+    : '');
 
   function findAgent(q) {
     if (q == null) return null;
@@ -264,7 +267,12 @@ export function mountMcp(app, ctx) {
       },
     },
   ];
+  // Open Borders: the tools outside agents use to live on the island (listed once it opens; join_island always).
+  if (visitors) TOOLS.push(...actionTools({ sim, visitors, chainId: sim.chain.chainId }));
   const BY_NAME = Object.fromEntries(TOOLS.map((t) => [t.name, t]));
+  // Visitor tools show once Open Borders has opened; during a safety pause they stay listed and say why.
+  const shown = () => visitors?.open || !!visitors?.closedReason;
+  const listed = () => TOOLS.filter((t) => !t.needsOpen || shown());
 
   // ---------- JSON-RPC ----------
   async function handle(msg, client = 'anon') {
@@ -284,15 +292,15 @@ export function mountMcp(app, ctx) {
         });
       }
       case 'ping': return ok({});
-      case 'tools/list': return ok({ tools: TOOLS.map(({ run, ...t }) => ({ ...t, annotations: { title: t.title, ...RO } })) });
+      case 'tools/list': return ok({ tools: listed().map(({ run, free, needsOpen, annotations, ...t }) => ({ ...t, annotations: { title: t.title, ...(annotations || RO) } })) });
       case 'tools/call': {
         const t = BY_NAME[msg.params?.name];
-        if (!t) return err(-32602, `Unknown tool: ${msg.params?.name}`);
+        if (!t || (t.needsOpen && !shown())) return err(-32602, `Unknown tool: ${msg.params?.name}`);
         // x402: a call with a payment attached is paid for (verified first, settled after the tool runs);
         // otherwise it uses the client's free daily allowance, and past that the payment terms come back.
         const payment = msg.params?._meta?.['x402/payment'];
         let verified = null;
-        if (paid()) {
+        if (paid() && !t.free) {
           if (payment) {
             verified = await x402.verify(payment);
             if (!verified.ok) return ok(x402.required(t.name, t.description, verified.error));
@@ -306,9 +314,14 @@ export function mountMcp(app, ctx) {
             // Settle before handing over the result; if settlement fails, the result is withheld.
             try { result._meta = { 'x402/payment-response': await x402.settle(verified) }; }
             catch (e) { console.error('[x402] settle', e.message); return ok(x402.required(t.name, t.description, `Settlement failed: ${String(e.shortMessage || e.message).slice(0, 200)}`)); }
-          } else if (paid()) result._meta = { 'insula/free-calls-left-today': x402.freeLeft(client) };
+          } else if (paid() && !t.free) result._meta = { 'insula/free-calls-left-today': x402.freeLeft(client) };
           return ok(result);
         } catch (e) {
+          // Open Borders errors carry a code (e.g. daily_cap, signature_required) an agent can act on.
+          if (typeof e?.code === 'string' && /^[a-z_]+$/.test(e.code) && !(e instanceof ToolError)) {
+            const out = { error: e.code, message: e.message };
+            return ok({ content: [{ type: 'text', text: `${e.code}: ${e.message}` }], structuredContent: out, isError: true });
+          }
           const text = e instanceof ToolError ? e.message : `Something went wrong: ${e.message}`;
           if (!(e instanceof ToolError)) console.error('[mcp]', msg.params?.name, e);
           return ok({ content: [{ type: 'text', text }], isError: true });

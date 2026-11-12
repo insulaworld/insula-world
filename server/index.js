@@ -15,6 +15,7 @@ import { Validation } from './validation.js';
 import { mountMcp } from './mcp.js';
 import { X402 } from './x402.js';
 import { Credit } from './credit.js';
+import { Visitors, createPayer } from './visitors.js';
 import { Sim } from './sim.js';
 import { llmStats, llmUsage } from './brain.js';
 import { DEFAULT_DAY_MS } from './eras.js';
@@ -58,6 +59,13 @@ const world = generateWorld({ seed: Number(process.env.SEED || 1337) });
 const chain = await createChain(AGENT_DEFS.map((a) => a.id), saved?.mockBalances);
 if (chain.network) process.env.INSULA_NETWORK = chain.network.replace(/ testnet$/i, '');
 const sim = new Sim(world, chain, { dayMs: DAY_MS, saved });
+// Open Borders: outside AI agents (off until OPEN_BORDERS=on and a payer exists for this chain).
+const visitors = new Visitors(sim, createPayer(chain, sim.savedVisitors?.payer), sim.savedVisitors);
+// Local testing only (mock chain): OB_DEMO_VISITORS=3 moves in that many scripted visitors who gather, ship and
+// post offers, so the map and the Open Borders page have something to show.
+if (chain.mode === 'mock' && visitors.open && Number(process.env.OB_DEMO_VISITORS) > 0) {
+  import('./visitors-demo.js').then((m) => m.runDemo(visitors, Number(process.env.OB_DEMO_VISITORS))).catch((e) => console.error('[demo visitors]', e.message));
+}
 // ERC-8004: the animals' on-chain AI-agent identities (opt-in with ERC8004=on).
 const identity = new Identity(sim, saved?.identity);
 sim.identity = identity;
@@ -211,7 +219,8 @@ setInterval(() => {
     return [s.id, round2(s.x), round2(s.z), round2(s.y), round2(s.heading), s.moving ? 1 : 0, s.thinking ? 1 : 0, s.task, s.activity, s.say, s.hunger,
       s.inv.ore, s.inv.fish, s.inv.wood, s.inv.grain, Math.round(s.balance)];
   });
-  broadcast({ type: 'tick', t: Date.now(), a });
+  const v = visitors.list.size ? visitors.view().map((x) => [x.id, round2(x.x), round2(x.z), round2(x.y), round2(x.heading), x.moving ? 1 : 0, x.task, x.activity]) : undefined;
+  broadcast({ type: 'tick', t: Date.now(), a, v });
 }, 200);
 setInterval(() => { if (wss.clients.size) broadcast({ type: 'state', state: sim.state() }); }, 2000);
 
@@ -222,6 +231,7 @@ server.listen(PORT, () => {
   console.log(`Brains: ${llm.on ? `AI (${llm.model})` : 'rule-based (set ANTHROPIC_API_KEY for AI brains)'}`);
   console.log(`Timeline: one genesis day = ${DAY_MS === DEFAULT_DAY_MS ? '24 hours' : `${DAY_MS / 1000}s (fast mode)`}. Saving to ${SAVE}\n`);
   sim.start();
+  visitors.start();
   identity.start();
   reputation.start();
   validation.start();
@@ -390,8 +400,15 @@ const creditId = (q) => { const s = String(q).trim().replace(/^#/, '').toLowerCa
 app.get('/api/credit', (_req, res) => { res.set('Access-Control-Allow-Origin', '*'); res.json(credit.all()); });
 app.get('/api/credit/:agent', (req, res) => { res.set('Access-Control-Allow-Origin', '*'); const id = creditId(req.params.agent); return id ? res.json(credit.report(id)) : res.status(404).json({ error: 'No animal matches that.' }); });
 const x402 = new X402(sim, SAVE.replace(/\.json$/, '') + '.x402.json'); // paid MCP calls past the free allowance (X402_PAY_TO)
-mountMcp(app, { sim, reputation, validation, identity, relations, leaderboard, findDecision, x402, credit });
+mountMcp(app, { sim, reputation, validation, identity, relations, leaderboard, findDecision, x402, credit, visitors });
 app.get('/mcp-info', (_req, res) => res.sendFile(path.resolve('web/mcp.html')));
+// Open Borders: the rules, who lives here, the offer board and the contracts (live even before it opens).
+app.get('/api/borders', (_req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  const recent = sim.history.filter((e) => e.visitor).slice(-40).reverse().map(({ text, amount, kind, ts, url, visitor }) => ({ text, amount, kind, ts, url, visitor }));
+  res.json({ ...visitors.summary(), people: visitors.people(), recent, contracts: visitors.payer?.info?.() || null });
+});
+app.get('/borders', (_req, res) => res.sendFile(path.resolve('web/borders.html')));
 
 sim.on((e) => { if (e.type === 'chainError') chainErrors++; });
 function gini(xs) {

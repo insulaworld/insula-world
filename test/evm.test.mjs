@@ -65,5 +65,11 @@ check(rc.gasUsed < sent.gasLimit, 'estimated gas limit has headroom');
 // Many trades in a row (nonces must stay in order).
 for (let i = 0; i < 12; i++) await chain.transfer(i % 2 ? 'felix' : 'penny', i % 2 ? 'penny' : 'felix', 5, `Insula #D9${i} why:x | trade ${i}`);
 check(await onchain('felix') === chain.balance('felix'), 'balances still match after 12 quick trades');
+// Open Borders: an island payment to a visitor's own address (not one of the island's wallets).
+const visitor = Wallet.createRandom().address;
+await chain.transfer('felix', visitor.toLowerCase(), 7, 'Insula #D99 why:x | Felix bought 1 fish from visitor V1');
+check(Number(formatUnits(await token.balanceOf(visitor), 18)) === 7, 'paid 7 coins to a visitor address');
+check(chain.addressOf(visitor.toLowerCase()) === visitor && chain.addressOf('nobody') === undefined, 'addressOf: island wallets, visitor addresses, nothing else');
+await chain.transfer('felix', 'nobody', 1, 'x').then(() => check(false, 'unknown recipient refused'), (e) => check(/unknown recipient/.test(e.message), 'unknown recipient refused'));
 console.log(`PASS: EVM trades move real tokens, memos land in calldata, bank tops up gas (${r2.sig.slice(0, 10)}…, ${r3.sig.slice(0, 10)}…)`);
 fs.rmSync(dir, { recursive: true, force: true });

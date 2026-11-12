@@ -242,6 +242,8 @@ button.why:hover { border-color: var(--gold); color: var(--gold); }
 .bubble::after { content: ''; position: absolute; left: 50%; bottom: -6px; width: 10px; height: 10px; transform: translateX(-50%) rotate(45deg); background: rgba(12, 16, 22, 0.78); border-right: 1px solid rgba(255, 255, 255, 0.16); border-bottom: 1px solid rgba(255, 255, 255, 0.16); }
 @keyframes bubble { from { opacity: 0; transform: translate(-50%, -88%) scale(0.92); } }
 .tag { position: absolute; transform: translate(-50%, -100%); font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; color: #fff; text-transform: uppercase; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.7); white-space: nowrap; }
+.tag.visitor::before { content: 'VISITOR · '; color: var(--mint); }
+.tag.visitor.leaving::after { content: ' · leaving'; color: var(--gold); }
 .tag.thinking::after { content: ' · thinking'; color: var(--gold); animation: pulse 1s ease-in-out infinite; }
 .place { font-family: var(--display); font-weight: 300; font-size: 10px; letter-spacing: 0.4em; color: rgba(255, 255, 255, 0.9); }
 .place { transition: opacity 0.3s ease; }

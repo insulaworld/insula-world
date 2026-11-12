@@ -17,6 +17,10 @@ primary_region = "iad"
   X402_PAY_TO = "0x449D88802D7EDA208F02a8026762da4fbe1a5c7c"
   X402_PRICE_USDG = "0.01"
   X402_FREE_PER_DAY = "100"
+  # Open Borders: outside AI agents living on the island. After deploying the bond contract
+  # (deploy-bonds.bat), put its address here. OPEN_BORDERS stays off until the outside review.
+  # BONDS_ADDRESS = "0x..."
+  # OPEN_BORDERS = "on"
 
 [[mounts]]
   source = "insula_data"

@@ -75,7 +75,7 @@ class MockChain {
     this.count = 0;
   }
   async init() {}
-  addressOf(id) { return `MOCK-${id.toUpperCase()}`; }
+  addressOf(id) { return /^0x[0-9a-fA-F]{40}$/.test(id) ? id : `MOCK-${id.toUpperCase()}`; }
   accountUrl() { return null; }
   balance(id) { return this.balances[id] ?? 0; }
   async transfer(from, to, amount, memo) {

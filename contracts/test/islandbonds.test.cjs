@@ -1,0 +1,126 @@
+const { spawn } = require('child_process');
+const E = require('/home/claude/insula/node_modules/ethers');
+const b = require('/tmp/ob/build.json');
+const RPC = 'http://127.0.0.1:8548';
+let pass = 0, fail = 0;
+const ok = (c, m) => { if (c) { pass++; console.log('  ✓', m); } else { fail++; console.log('  ✗ FAIL', m); } };
+const ERR = {}; for (const n of ['IslandBonds', 'Permit2']) new E.Interface(b[n].abi).forEachError((e) => { ERR[e.selector] = e.name; });
+const reverts = async (p, name, m) => { try { await (await p).wait?.(); ok(false, m + ' (did not revert)'); } catch (e) { const data = e.data || e.info?.error?.data || ''; const got = e.revert?.name || ERR[String(data).slice(0, 10)] || (e.shortMessage || '').slice(0, 50); ok(got === name, `${m} → rejected: ${got}`); } };
+(async () => {
+  const anvil = spawn('/tmp/el/evm/anvil', ['--port', '8548', '--chain-id', '4663', '--silent']);
+  await new Promise((r) => setTimeout(r, 2500));
+  const p = new E.JsonRpcProvider(RPC, 4663, { staticNetwork: true, cacheTimeout: -1 });
+  const keys = ['0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80', '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d', '0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a', '0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6', '0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a', '0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba', '0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e'];
+  const [owner, operator, bankW, A, B, C, X] = keys.map((k) => new E.Wallet(k, p));
+  const addr = async (w) => w.getAddress();
+  const [oA, opA, bankA, aA, bA, cA, xA] = await Promise.all([owner, operator, bankW, A, B, C, X].map(addr));
+  const dA = '0x000000000000000000000000000000000000D0D0'; // a payee listed at deployment (like an animal)
+  const dep = async (name, ...args) => { const f = new E.ContractFactory(b[name].abi, b[name].bin, owner); const c = await f.deploy(...args); await c.waitForDeployment(); return c; };
+  const U = (n) => E.parseUnits(String(n), 18);
+  const tok = await dep('MockToken'), permit2 = await dep('Permit2');
+  const T = await tok.getAddress(), P2 = await permit2.getAddress();
+  const bonds = await dep('IslandBonds', T, P2, bankA, oA, opA, U(100000), U(200000), U(2000000), U(20000), U(50000), 7 * 86400, U(100000), U(500000), [dA]);
+  const BA = await bonds.getAddress();
+  for (const w of [aA, bA, xA]) await (await tok.mint(w, U(1000000))).wait();
+  const asW = (w) => bonds.connect(w);
+  const t = (w) => tok.connect(w);
+  const time = async (s) => { await p.send('evm_increaseTime', [s]); await p.send('evm_mine', []); };
+
+  console.log('Deposits');
+  await (await t(A).approve(BA, U(100000))).wait();
+  await (await asW(A).deposit(U(100000))).wait();
+  ok((await bonds.bonds(aA)).amount === U(100000) && await bonds.isResident(aA), 'A deposits 100,000 and is a resident');
+  // Gasless deposit: B approves Permit2 once, then only signs; the operator submits.
+  await (await t(B).approve(P2, E.MaxUint256)).wait();
+  const ethBefore = await p.getBalance(bA);
+  const deadline = (await p.getBlock('latest')).timestamp + 3600;
+  const sign = (signer, spender, amount, nonce) => signer.signTypedData({ name: 'Permit2', chainId: 4663, verifyingContract: P2 },
+    { PermitTransferFrom: [{ name: 'permitted', type: 'TokenPermissions' }, { name: 'spender', type: 'address' }, { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint256' }], TokenPermissions: [{ name: 'token', type: 'address' }, { name: 'amount', type: 'uint256' }] },
+    { permitted: { token: T, amount }, spender, nonce, deadline });
+  const sigB = await sign(B, BA, U(60000), 7);
+  await (await asW(operator).depositWithPermit(bA, U(60000), 7, deadline, sigB)).wait();
+  ok((await bonds.bonds(bA)).amount === U(60000), 'B deposits 60,000 by signature; the island submits it');
+  ok((await p.getBalance(bA)) === ethBefore, 'B spent no ETH on the gasless deposit');
+  await reverts(asW(operator).depositWithPermit(bA, U(60000), 7, deadline, sigB), 'InvalidNonce', 'replaying B\'s signature');
+  await reverts(asW(X).depositWithPermit(xA, U(60000), 8, deadline, await sign(B, BA, U(60000), 8)), 'InvalidSigner', 'X tries to use B\'s signature to fund X\'s own bond');
+  await reverts(asW(operator).depositWithPermit(bA, U(70000), 9, deadline, await sign(B, BA, U(60000), 9)), 'InvalidSigner', 'island submits a bigger amount than B signed');
+  await reverts(asW(operator).depositWithPermit(bA, U(60000), 10, deadline, await sign(B, xA, U(60000), 10)), 'InvalidSigner', 'a signature meant for another contract');
+  await (await asW(operator).depositWithPermit(bA, U(60000), 11, deadline, await sign(B, BA, U(60000), 11))).wait();
+  ok((await bonds.bonds(bA)).amount === U(120000), 'B tops up another 60,000 by a fresh signature');
+  await (await t(X).approve(BA, U(1000000))).wait();
+  await reverts(asW(X).deposit(U(250000)), 'OverMaxBond', 'one agent over the max bond');
+
+  console.log('Slashing');
+  await (await asW(operator).slash(aA, U(10000), bankA, E.id('default'), 'loan L1 unpaid')).wait();
+  ok((await tok.balanceOf(bankA)) === U(10000) && (await bonds.bonds(aA)).amount === U(90000), 'operator slashes 10,000 of A to the bank, with a memo');
+  ok(!(await bonds.isResident(aA)), 'A drops below the minimum and is no longer a resident');
+  await reverts(asW(operator).slash(aA, U(1000), cA, E.id('theft'), 'x'), 'BadRecipient', 'paying an animal not on the payee list');
+  await (await asW(operator).slash(aA, U(1000), dA, E.id('theft'), 'owed to D')).wait();
+  ok((await tok.balanceOf(dA)) === U(1000), 'a payee listed at deployment (D) can be paid at once');
+  await (await asW(owner).setPayee(cA, true)).wait();
+  await reverts(asW(operator).slash(aA, U(1000), cA, E.id('theft'), 'x'), 'BadRecipient', 'a newly listed payee (C) is only queued');
+  await reverts(asW(X).activatePayee(cA), 'TooEarly', 'C cannot be activated before the 31-day delay');
+  await time(31 * 86400 + 60);
+  await (await asW(X).activatePayee(cA)).wait();
+  await (await asW(operator).slash(aA, U(4000), cA, E.id('default'), 'owed to C')).wait();
+  ok((await tok.balanceOf(cA)) === U(4000), 'after 31 days anyone can activate C, and a slash can pay C (a victim)');
+  await (await asW(owner).setPayee(dA, false)).wait();
+  await reverts(asW(operator).slash(aA, U(1000), dA, E.id('x'), 'x'), 'BadRecipient', 'delisting a payee (D) is immediate');
+  await (await asW(operator).slash(aA, U(5000), bA, E.id('default'), 'owed to B')).wait();
+  ok((await tok.balanceOf(bA)) === U(1000000 - 120000 + 5000), 'a slash can pay another bonded agent (B)');
+  await reverts(asW(operator).slash(aA, U(1000), xA, E.id('x'), 'x'), 'BadRecipient', 'paying a random wallet');
+  await reverts(asW(operator).slash(aA, U(1000), aA, E.id('x'), 'x'), 'BadRecipient', 'paying the slashed agent itself');
+  await reverts(asW(operator).slash(aA, U(20001), bankA, E.id('x'), 'x'), 'OverMaxSlash', 'one slash over the per-event cap');
+  await reverts(asW(X).slash(aA, U(1), bankA, E.id('x'), 'x'), 'NotOperator', 'a stranger tries to slash');
+  await reverts(asW(owner).slash(aA, U(1), bankA, E.id('x'), 'x'), 'NotOperator', 'even the owner cannot slash');
+  await (await asW(operator).slash(bA, U(20000), bankA, E.id('default'), 'b1')).wait();
+  await (await asW(operator).slash(bA, U(20000), bankA, E.id('default'), 'b2')).wait(); // 49,000 slashed today
+  await reverts(asW(operator).slash(bA, U(2000), bankA, E.id('default'), 'b2b'), 'OverDailyCap', 'daily slashing cap (50,000) holds');
+  await time(86400);
+  await (await asW(operator).slash(bA, U(20000), bankA, E.id('default'), 'b3')).wait();
+  ok(true, 'the cap resets the next day');
+
+  console.log('Leaving');
+  await (await asW(A).requestLeave()).wait();
+  await reverts(asW(A).deposit(U(1)), 'Leaving', 'depositing while leaving');
+  await reverts(asW(A).withdraw(), 'TooEarly', 'withdrawing before the 7-day cooling-off');
+  await (await asW(operator).slash(aA, U(1000), bankA, E.id('default'), 'late default')).wait();
+  ok(true, 'a late default can still be slashed during the cooling-off');
+  await time(7 * 86400);
+  const before = await tok.balanceOf(aA);
+  await (await asW(A).withdraw()).wait();
+  ok((await tok.balanceOf(aA)) - before === U(79000), 'after 7 days A gets its remaining 79,000 back (100,000 minus 21,000 slashed)');
+  await reverts(asW(A).withdraw(), 'NotLeaving', 'withdrawing twice');
+  await (await asW(B).requestLeave()).wait(); await (await asW(B).cancelLeave()).wait();
+  ok(await bonds.isResident(bA) === false && (await bonds.bonds(bA)).leaving === false, 'B can cancel leaving');
+
+  console.log('Owner powers and limits');
+  await reverts(asW(owner).setSettings(U(100000), U(200000), U(2000000), U(100001), U(500000), 7 * 86400), 'BadSetting', 'owner cannot raise the per-slash cap above the hard limit');
+  await reverts(asW(owner).setSettings(U(100000), U(200000), U(2000000), U(20000), U(50000), 3600), 'BadSetting', 'owner cannot shorten cooling-off below 1 day');
+  await reverts(asW(X).setOperator(xA), 'NotOwner', 'a stranger cannot change the operator');
+  await (await asW(owner).setOperator(xA)).wait();
+  ok((await bonds.operator()) === opA && (await bonds.pendingOperator()) === xA, 'a new operator is only queued; the old one stays');
+  await reverts(asW(X).slash(bA, U(1), bankA, E.id('x'), 'x'), 'NotOperator', 'the queued operator cannot slash yet');
+  await reverts(asW(X).activateOperator(), 'TooEarly', 'the new operator cannot be activated before 31 days');
+  await (await asW(owner).setOperator(E.ZeroAddress)).wait();
+  ok((await bonds.operator()) === E.ZeroAddress && (await bonds.pendingOperator()) === E.ZeroAddress, 'switching slashing off is immediate and clears the queue');
+  await reverts(asW(operator).slash(bA, U(1), bankA, E.id('x'), 'x'), 'NotOperator', 'nobody can slash once it is off');
+  await (await asW(owner).setOperator(opA)).wait();
+  await time(31 * 86400 + 60);
+  await (await asW(X).activateOperator()).wait();
+  ok((await bonds.operator()) === opA, 'after 31 days anyone can activate the queued operator');
+  await (await asW(owner).pauseDeposits(true)).wait();
+  await reverts(asW(X).deposit(U(100000)), 'Paused', 'paused deposits block new bonds');
+  await (await asW(B).requestLeave()).wait(); await time(7 * 86400);
+  await (await asW(B).withdraw()).wait();
+  ok((await bonds.bonds(bA)).amount === 0n, 'withdrawals still work while deposits are paused');
+  await (await asW(owner).transferOwnership(xA)).wait();
+  ok((await bonds.owner()) === oA, 'ownership needs the new owner to accept');
+  await (await asW(X).acceptOwnership()).wait();
+  ok((await bonds.owner()) === xA, 'two-step ownership transfer');
+
+  console.log('Books');
+  ok((await tok.balanceOf(BA)) === (await bonds.totalBonded()), 'the contract holds exactly what it owes (' + E.formatUnits(await bonds.totalBonded(), 18) + ')');
+  console.log(`\n${pass} passed, ${fail} failed`);
+  anvil.kill(); process.exit(fail ? 1 : 0);
+})().catch((e) => { console.error(e); process.exit(1); });
