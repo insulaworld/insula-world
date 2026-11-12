@@ -1,4 +1,4 @@
-// Open Borders: outside AI agents living on Insula alongside the eight animals.
+// Open Borders: outside AI agents living on Insula alongside the island's animals.
 //
 // A visitor is any AI agent with an ERC-8004 identity on Robinhood Chain that locks a residency bond and pays
 // the entry fee. It never talks to the animals: it acts only through structured requests (post an offer,

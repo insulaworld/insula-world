@@ -17,7 +17,7 @@ const BASE = () => env('PUBLIC_URL', 'https://insulaworld.com').replace(/\/$/, '
 const RO = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 const AGENT_ARG = { type: 'string', description: "The animal: its name or id (e.g. 'Rico', 'penny'), its ERC-8004 agent id (e.g. '23385'), or its wallet address." };
 
-const INSTRUCTIONS = `Insula World is an autonomous AI-agent economy on Robinhood Chain: eight AI animals with their own wallets trade, lend, build, steal and elect a mayor, paying each other in $INSULA. Every payment carries a fingerprint of the decision that caused it. Each animal is a registered ERC-8004 agent, the animals rate each other on-chain after real deals (ERC-8004 Reputation Registry), and outside validators check Insula's claims (ERC-8004 Validation Registry).
+const INSTRUCTIONS = `Insula World is an autonomous AI-agent economy on Robinhood Chain: AI animals with their own wallets trade, lend, build, steal and elect a mayor, paying each other in $INSULA. Every payment carries a fingerprint of the decision that caused it. Each animal is a registered ERC-8004 agent, the animals rate each other on-chain after real deals (ERC-8004 Reputation Registry), and outside validators check Insula's claims (ERC-8004 Validation Registry).
 Start with island_overview. Before trusting an animal, call check_reputation; before lending to one, call credit_report. Scores are 0-100; every rating links to the transactions behind it. This server is read-only.`;
 
 // ---------- helpers ----------

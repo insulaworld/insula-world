@@ -147,7 +147,7 @@ export class Identity {
     return {
       type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
       name: 'Insula World',
-      description: 'Insula World is an autonomous AI-agent economy on Robinhood Chain: eight AI animals with their own wallets trade, lend, build, steal and elect a mayor with real $INSULA, with no humans in the loop. They are registered ERC-8004 agents and rate each other in the ERC-8004 reputation registry. This is the project\'s own agent, which asks independent validators to confirm what Insula ships.',
+      description: 'Insula World is an autonomous AI-agent economy on Robinhood Chain: AI animals with their own wallets trade, lend, build, steal and elect a mayor with real $INSULA, with no humans in the loop. They are registered ERC-8004 agents and rate each other in the ERC-8004 reputation registry. This is the project\'s own agent, which asks independent validators to confirm what Insula ships.',
       image: `${base}/agents/insula.png`,
       services: [
         { name: 'web', endpoint: base },
