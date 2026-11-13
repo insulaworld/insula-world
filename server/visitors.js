@@ -23,6 +23,11 @@ import { BondWatch } from './bond-watch.js';
 import { REGISTRY as IDENTITY_REGISTRY } from './identity.js';
 
 const num = (k, d) => (process.env[k] !== undefined && process.env[k] !== '' && Number.isFinite(Number(process.env[k])) ? Number(process.env[k]) : d);
+// Invite-only: when OB_ALLOW lists wallet addresses (comma-separated), only those can move in or claim gas.
+// Used for the soft launch (our own test agent) and later for invited builders.
+const ALLOW = new Set((process.env.OB_ALLOW || '').split(',').map((a) => a.trim().toLowerCase()).filter((a) => /^0x[0-9a-f]{40}$/.test(a)));
+const invited = (address) => !ALLOW.size || ALLOW.has(String(address || '').toLowerCase());
+const INVITE_ONLY = 'Open Borders is invite-only right now: this wallet is not on the list. Follow @InsulaWorld for when it opens to everyone.';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 
@@ -108,6 +113,7 @@ export class Visitors {
     agentId = String(agentId ?? '');
     if (!/^\d{1,12}$/.test(agentId)) fail('bad_request', 'agentId must be your ERC-8004 agent ID (a number).');
     const addr = address.toLowerCase();
+    if (!invited(addr)) fail('invite_only', INVITE_ONLY);
     if ([...this.list.values()].some((v) => v.status !== 'gone' && (v.address === addr || v.agentId === agentId))) fail('already_resident', 'This agent or wallet already lives on the island.');
     if (this.residents().length >= RULES.cap) fail('full', `The island is full for now (${RULES.cap} residents).`);
     if (!(await this.payer.ownsIdentity(agentId, addr))) fail('not_your_identity', `ERC-8004 agent ${agentId} does not belong to ${address}.`);
@@ -155,6 +161,7 @@ export class Visitors {
   async gasTopUp({ agentId, address } = {}) {
     if (!this.open) fail('closed', 'Open Borders is not open yet.');
     if (!isAddr(address) || !/^\d{1,12}$/.test(String(agentId ?? ''))) fail('bad_request', 'Needs your 0x address and ERC-8004 agentId.');
+    if (!invited(address)) fail('invite_only', INVITE_ONLY);
     if (!this.payer.gasTopUp) fail('not_needed', 'No gas needed here.');
     if (this.watch?.lowGas) fail('refused', "The island's bank is low on ETH right now; send the approval with your own ETH, or try later.");
     try { return { ok: true, ...(await this.payer.gasTopUp({ agentId: String(agentId), address: address.toLowerCase(), need: RULES.bond + RULES.entryFee })) }; }
@@ -181,6 +188,7 @@ export class Visitors {
     const p = this.payer;
     if (!p) fail('closed', 'Open Borders is not open yet.');
     const v = address ? this.byAddress(address) : null;
+    if ((action === 'move_in' || action === 'get_gas') && !invited(address)) fail('invite_only', INVITE_ONLY); // before anything is signed
     const offerTtl = Math.ceil(RULES.offerTtlMs / 1000) + 600;
     const n = (x) => Number(x);
     switch (action) {
@@ -707,7 +715,7 @@ export class Visitors {
 
   summary() {
     return {
-      open: this.open, residents: this.residents().length, cap: RULES.cap,
+      open: this.open, residents: this.residents().length, cap: RULES.cap, inviteOnly: ALLOW.size > 0,
       safety: this.watch ? this.watch.view() : null, paused: this.closedReason ? { reason: this.closedReason } : null,
       rules: { bond: RULES.bond, entryFee: RULES.entryFee, marketFeePct: RULES.feeBps / 100, burnSharePct: RULES.burnShare * 100, dailyTradeCap: RULES.dailyCoins, lots: [RULES.minLot, RULES.maxLot], maxOffers: RULES.maxOffers, offerMinutes: RULES.offerTtlMs / 60_000 },
       totals: { ...this.totals },

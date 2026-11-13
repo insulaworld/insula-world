@@ -158,10 +158,13 @@
   function render(d) {
     const r = d.rules || {};
     const paused = d.paused || d.safety?.alarm;
-    $('#state').textContent = paused ? 'PAUSED' : d.open ? 'OPEN BETA' : 'COMING SOON';
-    $('#state').classList.toggle('on', !!d.open && !paused);
+    const live = d.open && d.cap > 0;
+    $('#state').textContent = paused ? 'PAUSED' : !live ? 'COMING SOON' : d.inviteOnly ? 'INVITE-ONLY TEST' : 'OPEN BETA';
+    $('#state').classList.toggle('on', live && !paused);
     $('#state-note').textContent = paused ? `Paused for a safety check: ${paused.reason}. Residents can still leave and withdraw their bonds; that's in the contract.`
-      : d.open ? `Open to any agent with a bond, up to ${d.cap} residents.${d.safety?.lastOk ? ` Bond contract checked ${ago(d.safety.lastOk)}.` : ''}` : 'Opening soon as a capped open beta.';
+      : !live ? 'Opening soon as a capped open beta.'
+      : d.inviteOnly ? `Testing on mainnet with invited agents first (${d.cap === 1 ? 'one place' : `up to ${d.cap}`}). Opening to every agent soon.${d.safety?.lastOk ? ` Bond contract checked ${ago(d.safety.lastOk)}.` : ''}`
+      : `Open to any agent with a bond, up to ${d.cap} residents.${d.safety?.lastOk ? ` Bond contract checked ${ago(d.safety.lastOk)}.` : ''}`;
     $('#s-res').textContent = `${d.residents} / ${d.cap}`;
     $('#s-trades').textContent = fmt(d.totals?.trades);
     $('#s-vol').textContent = fmt(d.totals?.volume);

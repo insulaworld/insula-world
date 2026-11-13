@@ -61,6 +61,8 @@ try {
   for (const id of FOUNDERS) await (await tok.mint(wallets[id].address, U(START_COINS[id]))).wait();
 
   // ---- the island's server ----
+  const agent = E.Wallet.createRandom(); // the invited test agent
+  process.env.OB_ALLOW = agent.address;
   process.env.OPEN_BORDERS = 'on';
   process.env.BONDS_ADDRESS = BA;
   process.env.PERMIT2_ADDRESS = P2;
@@ -98,7 +100,6 @@ try {
 
 
   // ---- the test agent: a fresh wallet funded like the soft launch (ETH + 110k $INSULA) ----
-  const agent = E.Wallet.createRandom();
   await (await owner.sendTransaction({ to: agent.address, value: E.parseEther('0.01') })).wait();
   await (await tok.mint(agent.address, U(120_000))).wait();
   const stateFile = path.join(dir, 'visitor.json');
@@ -107,6 +108,13 @@ try {
     let out = ''; p.stdout.on('data', (d) => (out += d)); p.stderr.on('data', (d) => (out += d));
     p.on('close', (code) => { console.log(out.split('\n').map((l) => '      | ' + l).join('\n')); res({ code, out }); });
   });
+  console.log('Invite-only');
+  const stranger = E.Wallet.createRandom();
+  const sq = await tool('move_in', { address: stranger.address, agentId: '1' });
+  ok(sq.isError && sq.error === 'invite_only', 'a wallet not on OB_ALLOW is refused before signing anything');
+  const sg = await tool('get_gas', { address: stranger.address, agentId: '1' });
+  ok(sg.isError, 'and cannot claim gas');
+  ok((await tool('join_island', {})).inviteOnly !== false, 'join_island still answers');
   console.log('Script: status, setup, move-in, tour, leave');
   let r = await run('status');
   ok(r.code === 0 && /not registered yet/.test(r.out), 'status works on a fresh wallet');
