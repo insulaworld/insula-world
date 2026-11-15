@@ -1144,7 +1144,7 @@ function ensureAgent(a) {
   if (agents.has(a.id)) return agents.get(a.id);
   const group = buildAnimal(a);
   const bubble = document.createElement('div');
-  bubble.className = 'bubble';
+  bubble.className = a.visitor ? 'bubble visitor' : 'bubble';
   bubble.hidden = true;
   const tag = document.createElement('div');
   tag.className = a.visitor ? 'tag visitor' : 'tag';
@@ -1696,13 +1696,13 @@ function applyTick(msg) {
     }
   }
   // Visitors (Open Borders): position, heading and what they're doing.
-  for (const [id, x, z, y, heading, moving, task, activity] of msg.v || []) {
+  for (const [id, x, z, y, heading, moving, task, activity, say] of msg.v || []) {
     const rec = agents.get(id);
     if (!rec?.data.visitor) continue;
     const a = rec.data, dt = rec.tickAt ? (now - rec.tickAt) / 1000 : 0;
     rec.vel = moving && dt > 0.05 && dt < 1 ? { x: (x - a.x) / dt, z: (z - a.z) / dt } : null;
     rec.tickAt = now;
-    Object.assign(a, { x, z, y, heading, moving: !!moving, task, activity });
+    Object.assign(a, { x, z, y, heading, moving: !!moving, task, activity, say: say ?? null });
   }
   applyAgents(latest);
 }

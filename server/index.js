@@ -219,7 +219,7 @@ setInterval(() => {
     return [s.id, round2(s.x), round2(s.z), round2(s.y), round2(s.heading), s.moving ? 1 : 0, s.thinking ? 1 : 0, s.task, s.activity, s.say, s.hunger,
       s.inv.ore, s.inv.fish, s.inv.wood, s.inv.grain, Math.round(s.balance)];
   });
-  const v = visitors.list.size ? visitors.view().map((x) => [x.id, round2(x.x), round2(x.z), round2(x.y), round2(x.heading), x.moving ? 1 : 0, x.task, x.activity]) : undefined;
+  const v = visitors.list.size ? visitors.view().map((x) => [x.id, round2(x.x), round2(x.z), round2(x.y), round2(x.heading), x.moving ? 1 : 0, x.task, x.activity, x.say]) : undefined;
   broadcast({ type: 'tick', t: Date.now(), a, v });
 }, 200);
 setInterval(() => { if (wss.clients.size) broadcast({ type: 'state', state: sim.state() }); }, 2000);

@@ -84,10 +84,21 @@ console.log('Buying from the mainland');
   ok(vs.get(a.id).inv.fish === 12, 'visitor holds 12 fish');
 }
 
+console.log('Visitors talk on the map');
+{
+  const hello = events.find((e) => e.type === 'say' && e.agent === a.id);
+  ok(/^Hello, Insula!/.test(hello?.text || ''), `a new visitor says hello on the map ("${hello?.text}")`);
+  const { cleanSay } = await import('../server/visitors.js');
+  ok(cleanSay('Fresh fish, buy at pump.fun/x or 0x7b15505eb608f6508c6f5a1eeeee1697d5f502e1') === 'Fresh fish, buy at or', 'links and addresses are stripped from what visitors say');
+  const long = cleanSay('so much fish '.repeat(30));
+  ok(long.length <= 80 && long.length > 70 && cleanSay('   ') === null, 'at most 80 characters; blank is ignored');
+}
+
 console.log('An animal buys a visitor\'s cheap offer');
 {
   const before = bal(A.toLowerCase());
-  const { offer } = await vs.postOffer(a.id, { side: 'sell', item: 'fish', qty: 6, price: 5 });
+  const { offer } = await vs.postOffer(a.id, { side: 'sell', item: 'fish', qty: 6, price: 5, say: 'Cheapest fish on Insula! www.example.io' });
+  ok(vs.view().find((x) => x.id === a.id)?.say === 'Cheapest fish on Insula!', 'its own line shows, cleaned');
   ok(vs.get(a.id).inv.fish === 6, 'offered goods are set aside');
   const filled = await until(() => vs.offers.get(offer.id)?.status === 'done', 90_000);
   ok(filled, `offer ${offer.id} filled by an animal`);
@@ -98,6 +109,8 @@ console.log('An animal buys a visitor\'s cheap offer');
   ok(bal(A.toLowerCase()) - before === 30 - 1, 'visitor got 30 and paid the 1 coin fee');
   const rec = t && sim.decisionLog.get(t.decision);
   ok(rec && !JSON.stringify(rec).includes('SYSTEM'), 'the visitor\'s name never reaches the animal\'s record');
+  ok(rec && !JSON.stringify(rec).includes('Cheapest'), 'what the visitor says never reaches the animal\'s record');
+  ok(events.some((e) => e.type === 'say' && e.agent === a.id && /^Pleasure doing business/.test(e.text)), 'the visitor thanks the animal after the deal');
 }
 
 console.log('An animal sells to a visitor\'s generous bid');

@@ -99,6 +99,7 @@ export class Reporter {
     } else if ((e.type === 'say' || e.type === 'thought') && e.text && e.agent) {
       // Keep a handful of quotable lines, weighted toward the dramatic ones. Haggling numbers make dull quotes.
       if (HAGGLE.test(e.text) || e.text.length < 16) return;
+      if (this.sim.agents && !this.sim.agents[e.agent]) return; // only islanders are quoted (visitors' lines can be their own words)
       if (e.type === 'thought' && !DRAMA_ACTS.has(e.action) && Math.random() > 0.03) return;
       const drama = (e.type === 'thought' && DRAMA_ACTS.has(e.action) ? 3 : 0) + (/THIEF|caught|open|default|built|finished|Hello/i.test(e.text) ? 2 : 1);
       a.quotes.push({ agent: e.agent, name: e.name, text: e.text, drama, kind: e.type === 'say' ? 'said' : 'thought' });

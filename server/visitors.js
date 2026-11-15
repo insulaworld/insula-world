@@ -63,6 +63,22 @@ const fail = (code, message) => { throw new VisitorError(code, message); };
 export function cleanName(name) {
   return String(name ?? '').normalize('NFKD').replace(/[^A-Za-z0-9 ._-]/g, '').replace(/\s+/g, ' ').trim().slice(0, 16).trim();
 }
+// What a visitor's avatar says on the map (an optional `say` on its actions). Shown over its head for a few
+// seconds, nowhere else (never quoted in the paper). Plain words only: no links, no addresses, 80 characters.
+// OB_VISITOR_SAY=off keeps every visitor on the island's stock lines.
+export function cleanSay(text) {
+  if (process.env.OB_VISITOR_SAY === 'off' || typeof text !== 'string') return null;
+  const t = text.normalize('NFKC')
+    .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ')
+    .replace(/\b(?:https?:\/\/|www\.)\S*/gi, '')
+    .replace(/\b[\w-]+(?:\.[\w-]+)*\.(?:com|net|org|io|xyz|fun|app|gg|co|me|ly|link|site|online|finance|money|ai|so|to|sh|cc|tv|info|club|top|vip|pro)\b\S*/gi, '')
+    .replace(/\b0x[0-9a-f]{6,}\b/gi, '')
+    .replace(/[A-HJ-NP-Za-km-z1-9]{32,}/g, '')
+    .replace(/[<>{}\[\]`]/g, '')
+    .replace(/\s+/g, ' ').trim().slice(0, 80).trim();
+  return t.length >= 2 ? t : null;
+}
+const SAY_MS = 4500;
 const isAddr = (a) => typeof a === 'string' && /^0x[0-9a-fA-F]{40}$/.test(a);
 const intIn = (x, lo, hi) => Number.isInteger(x) && x >= lo && x <= hi;
 
@@ -116,7 +132,7 @@ export class Visitors {
   byAddress(address) { const a = String(address).toLowerCase(); return [...this.list.values()].find((v) => v.address === a && v.status !== 'gone') || null; }
 
   // Move in: ERC-8004 identity owned by the address, a residency bond and the entry fee.
-  async moveIn({ agentId, address, name, look, color } = {}, auth) {
+  async moveIn({ agentId, address, name, look, color, say } = {}, auth) {
     if (!this.open) fail('closed', 'Open Borders is not open yet.');
     if (!isAddr(address)) fail('bad_request', 'address must be a 0x wallet address.');
     agentId = String(agentId ?? '');
@@ -147,6 +163,7 @@ export class Visitors {
     const text = `Visitor ${id} moved in: ${RULES.bond.toLocaleString('en-US')} $INSULA bond locked, ${RULES.entryFee.toLocaleString('en-US')} entry fee paid`;
     this.sim.emit({ type: 'trade', kind: 'entry', from: id, to: 'bank', amount: RULES.entryFee, text, rule: 'open-borders', visitor: id, ...(res.fee || {}) });
     this.sim.emit({ type: 'visitor', kind: 'arrive', visitor: this.#public(v) });
+    this.#say(v, say, `Hello, Insula! ${v.name} here.`, 6000);
     return { ok: true, visitor: this.#public(v), bond: res.bond || null, fee: res.fee || null };
   }
 
@@ -233,7 +250,7 @@ export class Visitors {
     }
   }
 
-  async moveOut(vid, auth) {
+  async moveOut(vid, auth, say) {
     const v = this.#resident(vid);
     for (const o of this.offers.values()) if (o.by === v.id && o.status === 'open') this.#close(o, 'cancelled');
     v.status = 'leaving';
@@ -242,6 +259,7 @@ export class Visitors {
     try { res = await this.payer.requestLeave({ address: v.address, auth }); } catch (e) { v.status = 'resident'; fail('payment_failed', `Leaving failed: ${e.message}`); }
     const held = Object.entries(v.inv).filter(([, n]) => n > 0).map(([i, n]) => `${n} ${i}`).join(', ');
     this.sim.log(`Visitor ${v.id} is leaving the island.`);
+    this.#say(v, say, 'Time to go. Thanks, Insula.', 6000);
     this.sim.emit({ type: 'visitor', kind: 'leave', visitor: this.#public(v) });
     (async () => {
       const d = this.sim.world.places.dock;
@@ -357,7 +375,7 @@ export class Visitors {
 
   // side 'sell': the visitor sells goods it holds (they're set aside until the offer closes).
   // side 'buy': the visitor buys; `auth` covers the price plus the fee (in production a signed Permit2 transfer).
-  async postOffer(vid, { side, item, qty, price } = {}, auth) {
+  async postOffer(vid, { side, item, qty, price, say } = {}, auth) {
     const v = await this.#begin(vid, { auth });
     if (side !== 'sell' && side !== 'buy') fail('bad_request', "side must be 'sell' or 'buy'.");
     this.#checkTrade(item, qty, price);
@@ -376,16 +394,18 @@ export class Visitors {
     this.offers.set(o.id, o);
     v.avatar.task = `${side === 'sell' ? 'selling' : 'buying'} ${item}`;
     this.#idleToMarket(v);
+    this.#say(v, say, side === 'sell' ? `${qty} ${item}, ${price} each. Anyone?` : `Buying ${qty} ${item} at ${price} each.`);
     this.sim.emit({ type: 'visitor', kind: 'offer', offer: this.#offerView(o) });
     return { ok: true, offer: this.#offerView(o) };
   }
 
-  async cancelOffer(vid, oid) {
+  async cancelOffer(vid, oid, say) {
     const v = await this.#begin(vid);
     const o = this.offers.get(oid);
     if (!o || o.by !== v.id) fail('not_found', `No offer ${oid} of yours.`);
     if (o.status !== 'open') fail('not_open', `Offer ${oid} is ${o.status}.`);
     this.#close(o, 'cancelled');
+    this.#say(v, say, o.side === 'sell' ? `Taking my ${o.item} back.` : `Never mind the ${o.item}.`);
     return { ok: true, offer: this.#offerView(o) };
   }
 
@@ -443,6 +463,7 @@ export class Visitors {
       if (v.status !== 'resident' || o.status !== 'taken') return;
       agent.face(v.avatar);
       v.avatar.face(agent);
+      this.#say(v, null, `Hi ${agent.name}!`, 2600);
       const total = o.qty * o.price;
       this.#rollDay(v);
       if (o.side === 'sell') {
@@ -454,6 +475,7 @@ export class Visitors {
         agent.inv[o.item] += o.qty;
         o.status = 'done';
         this.#done(v, agent, o, total, { type: 'trade', kind: o.item, item: o.item, from: agent.id, to: v.id, amount: total, qty: o.qty, price: o.price, text, visitor: v.id, ...res });
+        this.#say(v, null, `Pleasure doing business, ${agent.name}.`);
         await this.#chargeFee(v, o.fee, `${o.id}, sold ${o.qty} ${o.item} to ${agent.name}`, o.auth);
       } else {
         // The animal sells to the visitor: the visitor's signed transfer pays the animal and the fee in one go.
@@ -480,6 +502,7 @@ export class Visitors {
         v.stats.fees += o.fee;
         this.#countFee(o.fee);
         this.#done(v, agent, o, total, { type: 'trade', kind: o.item, item: o.item, from: v.id, to: agent.id, amount: total, qty: o.qty, price: o.price, text, visitor: v.id, decision: rec?.id || null, hash: rec?.hash || null, ...res });
+        this.#say(v, null, `Thanks, ${agent.name}. Good ${o.item}.`);
       }
     } catch (e) {
       this.sim.chainError(e, 'visitor trade');
@@ -503,7 +526,7 @@ export class Visitors {
   }
 
   // A visitor takes another visitor's offer. Both are outsiders, so each pays the fee.
-  async acceptOffer(vid, oid, auth) {
+  async acceptOffer(vid, oid, auth, say) {
     const v = await this.#begin(vid, { auth });
     const o = this.offers.get(oid);
     if (!o || o.status !== 'open' || o.expires < Date.now()) fail('not_open', `Offer ${oid} isn't open.`);
@@ -527,6 +550,7 @@ export class Visitors {
         this.#countFee(o.fee);
         this.#v2v(v, owner, o, total, { type: 'trade', kind: o.item, item: o.item, from: v.id, to: owner.id, amount: total, qty: o.qty, price: o.price, text, visitor: v.id, ...res });
         await this.#chargeFee(owner, o.fee, `${o.id}, sold to ${v.id}`, o.auth);
+        this.#say(v, say, `I'll take your ${o.item}, ${owner.name}.`);
         return { ok: true, trade: { item: o.item, qty: o.qty, price: o.price, total, fee: o.fee, tx: res.url || res.sig } };
       }
       if (v.inv[o.item] < o.qty) fail('not_enough', `You hold ${v.inv[o.item]} ${o.item}.`);
@@ -540,6 +564,7 @@ export class Visitors {
       this.#countFee(o.fee);
       this.#v2v(owner, v, o, total, { type: 'trade', kind: o.item, item: o.item, from: owner.id, to: v.id, amount: total, qty: o.qty, price: o.price, text, visitor: v.id, ...res });
       const feeRes = await this.#chargeFee(v, o.fee, `${o.id}, sold to ${owner.id}`, auth);
+      this.#say(v, say, `Here's your ${o.item}, ${owner.name}.`);
       return { ok: true, trade: { item: o.item, qty: o.qty, price: o.price, total, fee: o.fee, tx: res.url || res.sig, feePaid: Boolean(feeRes) } };
     } catch (e) {
       if (o.status === 'taken') { o.status = 'open'; o.taker = null; }
@@ -561,7 +586,7 @@ export class Visitors {
 
   // ---------- The dock: the mainland always buys (cheap) and sells (dear) ----------
 
-  async buy(vid, { item, qty } = {}, auth) {
+  async buy(vid, { item, qty, say } = {}, auth) {
     const v = await this.#begin(vid, { auth });
     if (!ITEMS.includes(item) || !this.sim.itemsOpen().includes(item)) fail('bad_request', `item must be one of: ${this.sim.itemsOpen().join(', ')}.`);
     if (!intIn(qty, 1, RULES.maxLot)) fail('bad_request', `qty must be a whole number from 1 to ${RULES.maxLot}.`);
@@ -580,10 +605,11 @@ export class Visitors {
     this.sim.recordTrade(null, 0, total);
     this.sim.emit({ type: 'trade', kind: 'import', from: v.id, to: 'bank', amount: total, qty, price, item, text, visitor: v.id, ...res });
     this.#walkToDock(v, `buying ${item} off the boat`);
+    this.#say(v, say, `${qty} ${item} off the boat, please.`);
     return { ok: true, item, qty, price, total, fee, holding: v.inv[item], tx: res.url || res.sig };
   }
 
-  async sell(vid, { item, qty } = {}, auth) {
+  async sell(vid, { item, qty, say } = {}, auth) {
     const v = await this.#begin(vid, { auth });
     if (!ITEMS.includes(item)) fail('bad_request', `item must be one of: ${ITEMS.join(', ')}.`);
     if (!intIn(qty, 1, RULES.maxLot * 3)) fail('bad_request', `qty must be a whole number from 1 to ${RULES.maxLot * 3}.`);
@@ -609,12 +635,13 @@ export class Visitors {
     this.sim.emit({ type: 'trade', kind: 'export', from: 'bank', to: v.id, amount: total, qty, price, item, text, visitor: v.id, ...res });
     const feeRes = await this.#chargeFee(v, fee, `shipped ${qty} ${item}`, auth);
     this.#walkToDock(v, `shipping ${item}`);
+    this.#say(v, say, `${qty} ${item} off to the mainland!`);
     return { ok: true, item, qty, price, total, fee, feePaid: Boolean(feeRes), tx: res.url || res.sig };
   }
 
   // ---------- Gathering: a visitor can work the land like anyone (average skill) ----------
 
-  async gather(vid, { item } = {}) {
+  async gather(vid, { item, say } = {}) {
     const v = await this.#begin(vid, { busy: true });
     if (!ITEMS.includes(item) || !this.sim.itemsOpen().includes(item)) fail('bad_request', `item must be one of: ${this.sim.itemsOpen().join(', ')}.`);
     const n = Math.min(CARRY, RULES.maxHold - v.inv[item]);
@@ -622,6 +649,7 @@ export class Visitors {
     const per = RESOURCES[item].base;
     v.busy = `gathering ${item}`;
     v.stroll = null;
+    this.#say(v, say, { ore: 'Off to dig some ore.', fish: 'Gone fishing.', wood: 'Time to chop some wood.', grain: 'Heading to the fields.' }[item]);
     const a = v.avatar;
     (async () => {
       try {
@@ -710,6 +738,12 @@ export class Visitors {
     if (this.payer?.isResident) setInterval(() => this.#syncResidency(), Number(process.env.OB_SYNC_MS || 300_000));
   }
 
+  // The visitor's avatar speaks: its own words (cleaned) if it sent any, else the island's stock line.
+  #say(v, own, stock, ms = SAY_MS) {
+    const text = cleanSay(own) || stock;
+    if (text && v?.avatar) v.avatar.speak(text, ms);
+  }
+
   // ---------- What viewers and tools see ----------
 
   #public(v) {
@@ -756,6 +790,7 @@ export class Visitors {
         id: v.id, name: v.name, look: v.look, color: v.color, visitor: true, status: v.status,
         x: +a.x.toFixed(3), z: +a.z.toFixed(3), y: groundY(this.sim.world, a.x, a.z), heading: +a.heading.toFixed(3),
         moving: Boolean(a.target || a.follow), task: a.task, activity: a.activity || null,
+        say: a.say && a.say.until > Date.now() ? a.say.text : null,
         inv: { ...v.inv }, erc8004: { agentId: v.agentId },
       };
     });

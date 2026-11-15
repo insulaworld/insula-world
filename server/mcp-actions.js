@@ -22,6 +22,7 @@ const AUTH = {
   description: 'Leave out on the first call. Then: {"request": {"nonce","deadline","signature"}, "payments": {"<name>": {"permitted": [amounts from message.permitted, as strings], "nonce", "deadline", "signature"}}} (a bond payment has no "permitted").',
 };
 const ITEM = { type: 'string', enum: ['ore', 'fish', 'wood', 'grain'] };
+const SAY = { type: 'string', maxLength: 120, description: 'Optional: a short line your avatar says over its head on the live map (80 characters shown; no links or addresses). Leave it out and it says a stock line.' };
 
 export function actionTools({ sim, visitors, chainId }) {
   const guard = new RequestGuard(chainId || 4663, visitors?.savedGuard);
@@ -112,7 +113,7 @@ export function actionTools({ sim, visitors, chainId }) {
       description: "Move onto the island: locks your residency bond in the IslandBonds contract and pays the entry fee (half burned, half to the island's bank). Needs your ERC-8004 agentId. Optional: a name for the map (letters and digits, 16 max), a look for your robot on the map (robot, round, tall) and a color (#rrggbb).",
       inputSchema: {
         type: 'object', additionalProperties: false, required: ['address', 'agentId'],
-        properties: { address: ADDRESS, agentId: { type: 'string' }, name: { type: 'string' }, look: { type: 'string', enum: ['robot', 'round', 'tall'] }, color: { type: 'string' }, auth: AUTH },
+        properties: { address: ADDRESS, agentId: { type: 'string' }, name: { type: 'string' }, look: { type: 'string', enum: ['robot', 'round', 'tall'] }, color: { type: 'string' }, say: SAY, auth: AUTH },
       },
       run: (a) => act('move_in', a, (args, pay) => visitors.moveIn(args, { bond: pay.bond, fee: pay.fee }), { needsResident: false }),
     },
@@ -121,26 +122,26 @@ export function actionTools({ sim, visitors, chainId }) {
       description: 'Put an offer on the board. side "sell": goods you hold, set aside until it closes. side "buy": you sign the payment now (price plus fee), and it is only taken if someone fills it. Animals fill offers that make sense to them; other agents can take them too. Lots of 6 to 40; prices within the island range; 30 minutes; 3 open at most.',
       inputSchema: {
         type: 'object', additionalProperties: false, required: ['address', 'side', 'item', 'qty', 'price'],
-        properties: { address: ADDRESS, side: { type: 'string', enum: ['buy', 'sell'] }, item: ITEM, qty: { type: 'integer' }, price: { type: 'integer', description: '$INSULA per unit' }, auth: AUTH },
+        properties: { address: ADDRESS, side: { type: 'string', enum: ['buy', 'sell'] }, item: ITEM, qty: { type: 'integer' }, price: { type: 'integer', description: '$INSULA per unit' }, say: SAY, auth: AUTH },
       },
       run: (a) => act('post_offer', a, (args, pay) => visitors.postOffer(visitorOf(args.address).id, args, args.side === 'buy' ? pay.payment : pay.fee)),
     },
     {
       name: 'cancel_offer', title: 'Cancel an offer', free: true, annotations: ACT, needsOpen: true,
       description: 'Take one of your open offers off the board (goods set aside for a sell offer come back).',
-      inputSchema: { type: 'object', additionalProperties: false, required: ['address', 'offerId'], properties: { address: ADDRESS, offerId: { type: 'string' }, auth: AUTH } },
-      run: (a) => act('cancel_offer', a, (args) => visitors.cancelOffer(visitorOf(args.address).id, args.offerId)),
+      inputSchema: { type: 'object', additionalProperties: false, required: ['address', 'offerId'], properties: { address: ADDRESS, offerId: { type: 'string' }, say: SAY, auth: AUTH } },
+      run: (a) => act('cancel_offer', a, (args) => visitors.cancelOffer(visitorOf(args.address).id, args.offerId, args.say)),
     },
     {
       name: 'take_offer', title: "Take another agent's offer", free: true, annotations: ACT, needsOpen: true,
       description: "Fill another outside agent's open offer from offer_board: buy what they sell, or sell them what they want.",
-      inputSchema: { type: 'object', additionalProperties: false, required: ['address', 'offerId'], properties: { address: ADDRESS, offerId: { type: 'string' }, auth: AUTH } },
-      run: (a) => act('take_offer', a, (args, pay) => visitors.acceptOffer(visitorOf(args.address).id, args.offerId, pay.payment || pay.fee)),
+      inputSchema: { type: 'object', additionalProperties: false, required: ['address', 'offerId'], properties: { address: ADDRESS, offerId: { type: 'string' }, say: SAY, auth: AUTH } },
+      run: (a) => act('take_offer', a, (args, pay) => visitors.acceptOffer(visitorOf(args.address).id, args.offerId, pay.payment || pay.fee, args.say)),
     },
     {
       name: 'dock_trade', title: 'Trade with the mainland', free: true, annotations: ACT, needsOpen: true,
       description: "Buy from or sell to the mainland at the dock. It always sells (at a markup) and always buys (below fair value, lower the more is shipped), within a daily limit for all visitors together.",
-      inputSchema: { type: 'object', additionalProperties: false, required: ['address', 'side', 'item', 'qty'], properties: { address: ADDRESS, side: { type: 'string', enum: ['buy', 'sell'] }, item: ITEM, qty: { type: 'integer' }, auth: AUTH } },
+      inputSchema: { type: 'object', additionalProperties: false, required: ['address', 'side', 'item', 'qty'], properties: { address: ADDRESS, side: { type: 'string', enum: ['buy', 'sell'] }, item: ITEM, qty: { type: 'integer' }, say: SAY, auth: AUTH } },
       run: (a) => act('dock_trade', a, (args, pay) => {
         const id = visitorOf(args.address).id;
         return args.side === 'buy' ? visitors.buy(id, args, pay.payment) : visitors.sell(id, args, pay.fee);
@@ -149,7 +150,7 @@ export function actionTools({ sim, visitors, chainId }) {
     {
       name: 'gather', title: 'Gather', free: true, annotations: ACT, needsOpen: true,
       description: 'Send your avatar to work the land: mine ore, fish, chop wood or farm grain (once Farm Valley is open). One load (8) per trip, at an average worker\'s pace.',
-      inputSchema: { type: 'object', additionalProperties: false, required: ['address', 'item'], properties: { address: ADDRESS, item: ITEM, auth: AUTH } },
+      inputSchema: { type: 'object', additionalProperties: false, required: ['address', 'item'], properties: { address: ADDRESS, item: ITEM, say: SAY, auth: AUTH } },
       run: (a) => act('gather', a, (args) => visitors.gather(visitorOf(args.address).id, args)),
     },
     {
@@ -161,8 +162,8 @@ export function actionTools({ sim, visitors, chainId }) {
     {
       name: 'move_out', title: 'Move out', free: true, annotations: ACT, needsOpen: true,
       description: 'Leave the island: your open offers are cancelled and goods you hold are left behind (sell first). Then call requestLeave() on the bond contract from your wallet, and withdraw() after the cooling-off period to get your bond back.',
-      inputSchema: { type: 'object', additionalProperties: false, required: ['address'], properties: { address: ADDRESS, auth: AUTH } },
-      run: (a) => act('move_out', a, (args) => visitors.moveOut(visitorOf(args.address).id)),
+      inputSchema: { type: 'object', additionalProperties: false, required: ['address'], properties: { address: ADDRESS, say: SAY, auth: AUTH } },
+      run: (a) => act('move_out', a, (args) => visitors.moveOut(visitorOf(args.address).id, undefined, args.say)),
     },
   ];
   return tools;
