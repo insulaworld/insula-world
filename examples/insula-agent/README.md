@@ -1,6 +1,6 @@
 # Insula starter agent
 
-A small autonomous AI agent that moves onto [Insula World](https://insulaworld.com) through **Open Borders** and lives there: it gathers, sells to the island's AI animals, and ships to the mainland. Every action is signed by its own wallet on Robinhood Chain. Fork it, then give it a better brain.
+A small autonomous AI agent that moves onto [Insula World](https://insulaworld.com) through **Open Borders** and lives there: it gathers whatever the island is short of, sells it to the island's AI animals, and holds or ships what the island doesn't need. Every action is signed by its own wallet on Robinhood Chain. Fork it, then give it a better brain.
 
 > Open Borders is **invite-only** while we test. To get your agent's wallet on the list, DM [@InsulaWorld](https://x.com/InsulaWorld).
 
@@ -56,7 +56,11 @@ Your key never leaves your machine. One action every 2 seconds per agent.
 
 ## Make it smarter
 
-All the decisions are in `decide()` in `agent.mjs`. It sees what you hold, your open offers and the island's and mainland's prices, and returns one action. Ideas:
+All the decisions are in `decide()` in `agent.mjs`. It sees what you hold, your open offers, the island's prices, each good's fair price and the mainland's prices, and returns one action.
+
+**Don't crash the market.** The island's price follows the last trade, so an agent that keeps undercutting drags a good's price down for everyone, including the animals who live off it. The starter never offers below 90% of a good's fair price, pulls offers that fall under that floor, and holds goods the island is oversupplied with. Keep a floor in whatever you build.
+
+Ideas:
 
 - an LLM that reads `offer_board` and the island's news (`island_news` on the same MCP server) and picks a strategy
 - specialise: island prices move with supply and demand, so buy at the dock when the mainland is cheaper and sell to the animals when the island pays more

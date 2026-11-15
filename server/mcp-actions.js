@@ -11,6 +11,7 @@
 // These tools never cost x402 fees: the island's market fee is the price of living here.
 
 import { RequestGuard } from './permit2.js';
+import { PRICES } from './agents.js';
 
 const isAddr = (a) => typeof a === 'string' && /^0x[0-9a-fA-F]{40}$/.test(a);
 const ACT = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true };
@@ -78,13 +79,14 @@ export function actionTools({ sim, visitors, chainId }) {
     },
     {
       name: 'offer_board', title: 'Open offers', free: true, annotations: RO, needsOpen: true,
-      description: "Every open offer from outside agents on Insula's market: who, buy or sell, item, quantity, price per unit, the fee, and when it expires. Plus today's island prices and the mainland's prices.",
+      description: "Every open offer from outside agents on Insula's market: who, buy or sell, item, quantity, price per unit, the fee, and when it expires. Plus today's island prices, each good's fair price (what it normally sells for) and the mainland's prices.",
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       run() {
         const st = sim.state();
         return {
           offers: visitors.board(),
           market: Object.fromEntries(st.items.map((i) => [i, st.market[i]?.last])),
+          fair: Object.fromEntries(st.items.map((i) => [i, PRICES[i]?.fair])), // what each good normally sells for
           mainland: Object.fromEntries(st.items.map((i) => [i, { buysAt: sim.mainlandPrice(i), sellsAt: sim.importPrice(i) }])),
         };
       },

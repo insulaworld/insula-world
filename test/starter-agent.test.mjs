@@ -112,6 +112,10 @@ try {
   ok(C((await bonds.bonds(agent.address)).amount) === 100000, 'bond locked on-chain');
   ok(/gather: .* → ok/.test(log), 'gathers what pays best');
   ok(/post_offer: .* → ok/.test(log), 'offers its goods to the animals');
+  const { PRICES } = await import('../server/agents.js');
+  const offers = [...log.matchAll(/(\w+) in hand; offering \d+ at (\d+)/g)].map((m) => [m[1], Number(m[2])]);
+  ok(offers.length && offers.every(([item, p]) => p >= Math.ceil(PRICES[item].fair * 0.9)), `never offers below 90% of fair (${offers.map(([i, p]) => i + '@' + p).join(', ')})`);
+  ok(Object.entries(sim.market).every(([i, m]) => !m?.last || m.last >= PRICES[i].fair * 0.6), `island prices hold up (${Object.entries(sim.market).map(([i, m]) => i + ' ' + m?.last).join(', ')})`);
   const v = vs.byAddress(agent.address);
   ok(v && v.stats.trades >= 1, `made real trades (${v?.stats.trades})`);
   ok(!/STOP:|error:/.test(log), 'no errors');

@@ -1,8 +1,8 @@
 // Insula starter agent: a small autonomous AI-agent body for Open Borders. Fork it and give it a brain.
 //
 // It moves onto Insula World (Robinhood Chain) from its own wallet and then lives there on a loop:
-// gather what's worth the most, offer it to the island's animals a little under the market price, and ship
-// to the mainland whatever nobody buys. Every action is signed here; only signatures leave this machine.
+// gather whatever is scarce, offer it to the island's animals just under the market price (never under a
+// floor near its fair price, so it doesn't crash the market), and hold or ship what the island doesn't need. Every action is signed here; only signatures leave this machine.
 //
 //   npm install && node agent.mjs            (key from AGENT_KEY, or typed at a hidden prompt)
 //
@@ -91,37 +91,40 @@ async function moveIn(rules, K) {
 }
 
 // ---------- the brain: one decision per tick ----------
-// Sees what you hold, your open offers, the island's prices and the mainland's. Returns one action or null.
-// A simple trader: sell held goods to the animals just under the market, ship stale goods to the mainland,
-// otherwise gather whatever the island pays most for.
-function decide({ me, board, gatheringUntil, shipNext }) {
-  const market = board.market || {};
+// Sees what you hold, your open offers, the island's prices, each good's fair price and the mainland's.
+// Returns one action or null. A simple, careful trader: it never dumps. The island's price follows the
+// last trade, so underselling again and again would crash the market (and hurt the animals who make
+// their living from it). This brain keeps a floor under its prices and works on whatever is scarce.
+const FLOOR = 0.9;          // never offer below 90% of a good's fair price
+function decide({ me, board, gatheringUntil }) {
+  const market = board.market || {}, fair = board.fair || {}, mainland = board.mainland || {};
   const mine = (me.offers || []).filter((o) => o.status === 'open');
+  const floor = (item) => Math.ceil((fair[item] || market[item] || 1) * FLOOR);
   if ((me.dailyCapLeft ?? 1e9) < 100) return null;                                   // done trading for today
-  // 1. An offer nobody took in time: pull it and ship to the mainland instead.
+  // 1. An offer priced under the floor (the market moved, or an older version listed it): pull it.
+  const cheap = mine.find((o) => o.side === 'sell' && o.price < floor(o.item));
+  if (cheap) return { tool: 'cancel_offer', args: { offerId: cheap.id }, why: `my ${cheap.item} at ${cheap.price} is under its floor (${floor(cheap.item)}); pulling it` };
+  // 2. An offer nobody took in time: pull it, to relist or ship.
   const stale = mine.find((o) => o.side === 'sell' && o.expiresIn < 300);
-  if (stale) return { tool: 'cancel_offer', args: { offerId: stale.id }, why: `nobody bought my ${stale.item}; pulling it to ship instead`, pulled: stale.item };
-  // 2. Goods nobody on the island wanted: ship them to the mainland at the dock.
-  for (const item of shipNext) {
-    const have = me.inv?.[item] || 0;
-    if (have >= 6) return { tool: 'dock_trade', args: { side: 'sell', item, qty: Math.min(have, 40) }, why: `shipping ${have} ${item} to the mainland`, shipped: item };
-    shipNext.delete(item);
-  }
-  // 3. Goods in hand: list them for the animals (up to 3 offers), 10% under the island price so they bite.
-  //    With every offer slot used, ship the surplus to the mainland instead of hoarding it.
+  if (stale) return { tool: 'cancel_offer', args: { offerId: stale.id }, why: `nobody bought my ${stale.item}; pulling it` };
+  // 3. Goods in hand: offer them to the animals just under the island price, but never under the floor.
+  //    If the island is oversupplied (its price under the floor), ship only if the mainland pays decently;
+  //    otherwise hold and let the market recover.
   for (const [item, have] of Object.entries(me.inv || {})) {
-    if (have < 6 || !market[item]) continue;
-    if (mine.length < 3) {
-      const qty = Math.min(have, 40), price = Math.max(1, Math.round(market[item] * 0.9));
-      return { tool: 'post_offer', args: { side: 'sell', item, qty, price }, why: `${have} ${item} in hand; offering ${qty} at ${price} (island price ${market[item]})` };
+    if (have < 6) continue;
+    const price = Math.max(floor(item), Math.round((market[item] || fair[item]) * 0.95));
+    if (mine.length < 3 && (market[item] || 0) >= floor(item)) {
+      const qty = Math.min(have, 40);
+      return { tool: 'post_offer', args: { side: 'sell', item, qty, price }, why: `${have} ${item} in hand; offering ${qty} at ${price} (island ${market[item]}, fair ${fair[item]})` };
     }
-    return { tool: 'dock_trade', args: { side: 'sell', item, qty: Math.min(have, 40) }, why: `all offer slots in use; shipping ${have} ${item} to the mainland` };
+    const ship = mainland[item]?.buysAt || 0;
+    if (ship >= (fair[item] || 0) * 0.7) return { tool: 'dock_trade', args: { side: 'sell', item, qty: Math.min(have, 40) }, why: `island ${item} is oversupplied; the mainland pays ${ship}` };
   }
-  // 4. Nothing to sell: go gather whatever the island pays most for.
+  // 4. Nothing to sell: gather whatever is scarcest (highest price compared with fair), if hands aren't full.
   if (Date.now() < gatheringUntil) return null;
-  if (Object.values(me.inv || {}).reduce((t, n) => t + n, 0) >= 12) return null; // hands full enough
-  const best = Object.entries(market).filter(([, p]) => p).sort((a, b) => b[1] - a[1])[0];
-  if (best) return { tool: 'gather', args: { item: best[0] }, why: `${best[0]} pays best right now (${best[1]})` };
+  if (Object.values(me.inv || {}).reduce((t, n) => t + n, 0) >= 12) return null;     // holding enough already
+  const best = Object.keys(market).filter((i) => market[i] && fair[i]).sort((x, y) => market[y] / fair[y] - market[x] / fair[x])[0];
+  if (best) return { tool: 'gather', args: { item: best }, why: `${best} is scarcest right now (${market[best]} vs fair ${fair[best]})` };
   return null;
 }
 
@@ -136,20 +139,17 @@ if (me.isError) {
 }
 const endAt = MAX_MIN ? Date.now() + MAX_MIN * 60_000 : Infinity;
 let gatheringUntil = 0;
-const shipNext = new Set(); // goods pulled from the market, to ship at the dock
 while (Date.now() < endAt) {
   try {
     me = await tool('my_visitor', { address: ME });
     if (me.isError) die(`no longer a resident: ${me.message}`);
     if (me.owedFees > 0) { const r = await act('pay_fees'); log(r.isError ? `couldn't pay fees: ${r.message}` : `paid ${me.owedFees} in fees`); }
     const board = await tool('offer_board');
-    const d = decide({ me, board, gatheringUntil, shipNext });
+    const d = decide({ me, board, gatheringUntil });
     if (d) {
       const r = await act(d.tool, d.args);
       log(`${d.tool}: ${d.why} → ${r.isError ? `refused (${r.error}: ${r.message})` : 'ok'}`);
       if (d.tool === 'gather' && !r.isError) gatheringUntil = Date.now() + (r.etaSeconds || 60) * 1000;
-      if (d.pulled && !r.isError) shipNext.add(d.pulled);
-      if (d.shipped) shipNext.delete(d.shipped);
     } else log(`idle · holds ${JSON.stringify(me.inv)} · ${me.stats?.trades || 0} trades so far`);
   } catch (e) { log('error:', e.message); }
   await sleep(TICK_S * 1000);
