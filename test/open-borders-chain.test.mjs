@@ -62,6 +62,7 @@ try {
 
   // ---- the island's server ----
   process.env.OPEN_BORDERS = 'on';
+  process.env.OB_LOGS_RPC = RPC; // the watchdog's event searches go to the local test chain, not the public node
   process.env.BONDS_ADDRESS = BA;
   process.env.PERMIT2_ADDRESS = P2;
   process.env.ERC8004_REGISTRY = ID;

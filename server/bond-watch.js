@@ -12,7 +12,11 @@
 //     key was used; legitimate changes are rare, and the alarm is a prompt to check).
 //  4. The bank still has ETH for visitors' gas.
 
-import { Contract, Interface, getAddress, formatUnits, id as topicOf } from 'ethers';
+import { Contract, Interface, JsonRpcProvider, getAddress, formatUnits, id as topicOf } from 'ethers';
+
+// Event searches go to the chain's public node (override with OB_LOGS_RPC). Hosted nodes like Alchemy cap
+// eth_getLogs at a few blocks on cheaper plans and bill each search heavily; the island's payments stay on RPC_URL.
+const PUBLIC_RPC = { 4663: 'https://rpc.mainnet.chain.robinhood.com', 46630: 'https://rpc.testnet.chain.robinhood.com' };
 
 const IFACE = new Interface([
   'function totalBonded() view returns (uint256)',
@@ -43,6 +47,9 @@ export class BondWatch {
     this.lastCheck = null;
     this.lastOk = null;
     this.span = 50_000;
+    this.maxSpan = 1_000_000; // lowered to what the node actually allows, so it doesn't keep re-trying bigger ranges
+    const url = process.env.OB_LOGS_RPC ?? PUBLIC_RPC[Number(payer.chainId)];
+    this.logsProvider = payer.logsProvider || (url ? new JsonRpcProvider(url, Number(payer.chainId) || undefined, { staticNetwork: !!payer.chainId }) : this.provider);
     if (this.alarm) this.visitors.closeForSafety(this.alarm.reason, false);
   }
 
@@ -51,11 +58,12 @@ export class BondWatch {
     for (let a = from; a <= to;) {
       const b = Math.min(to, a + this.span - 1);
       try {
-        out.push(...(await this.provider.getLogs({ address: this.payer.bonds, topics: [WATCHED], fromBlock: a, toBlock: b })));
+        out.push(...(await this.logsProvider.getLogs({ address: this.payer.bonds, topics: [WATCHED], fromBlock: a, toBlock: b })));
         a = b + 1;
-        if (this.span < 1_000_000) this.span *= 2;
+        this.span = Math.min(this.maxSpan, this.span * 2);
       } catch (e) {
         if (this.span <= 10) throw e;
+        this.maxSpan = Math.max(10, Math.floor(this.span / 2));
         this.span = Math.max(10, Math.floor(this.span / 4));
       }
     }

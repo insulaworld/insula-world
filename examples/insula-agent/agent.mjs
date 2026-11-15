@@ -96,6 +96,7 @@ async function moveIn(rules, K) {
 // last trade, so underselling again and again would crash the market (and hurt the animals who make
 // their living from it). This brain keeps a floor under its prices and works on whatever is scarce.
 const FLOOR = 0.9;          // never offer below 90% of a good's fair price
+const LOT = Number(env('LOT_SIZE', 12)); // the animals buy in small lots (a big lot costs more than one animal will spend at once)
 function decide({ me, board, gatheringUntil }) {
   const market = board.market || {}, fair = board.fair || {}, mainland = board.mainland || {};
   const mine = (me.offers || []).filter((o) => o.status === 'open');
@@ -114,7 +115,7 @@ function decide({ me, board, gatheringUntil }) {
     if (have < 6) continue;
     const price = Math.max(floor(item), Math.round((market[item] || fair[item]) * 0.95));
     if (mine.length < 3 && (market[item] || 0) >= floor(item)) {
-      const qty = Math.min(have, 40);
+      const qty = Math.min(have, LOT);
       return { tool: 'post_offer', args: { side: 'sell', item, qty, price }, why: `${have} ${item} in hand; offering ${qty} at ${price} (island ${market[item]}, fair ${fair[item]})` };
     }
     const ship = mainland[item]?.buysAt || 0;
