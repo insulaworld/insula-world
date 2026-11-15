@@ -646,12 +646,28 @@ export class Visitors {
     Promise.race([v.avatar.walkTo(d.x, d.z), sleep(30_000)]).finally(() => { if (v.stroll === me && !v.busy) { v.stroll = null; v.avatar && (v.avatar.task = 'looking around'); } });
   }
 
+  // Idle visitors don't stand frozen: they wander like any resident. Mostly around the market (where buyers
+  // are), sometimes out to the South Meadow or the dock, with a pause wherever they stop.
   #idleToMarket(v) {
     if (v.busy || v.stroll || !v.avatar) return;
-    const m = this.sim.world.places.market;
-    if (dist(v.avatar, m) < 7) return;
+    const P = this.sim.world.places;
+    const r = Math.random();
+    const [where, task, spread] = r < 0.7 || !P.meadow ? [P.market, 'strolling around the market', 7] : r < 0.88 ? [P.meadow, 'exploring the South Meadow', 6] : [P.dock, 'looking at the boats', 3];
+    let to = null;
+    for (let i = 0; i < 12 && !to; i++) {
+      const a = Math.random() * Math.PI * 2, d = 2 + Math.random() * spread;
+      const x = where.x + Math.cos(a) * d, z = where.z + Math.sin(a) * d;
+      if (!this.sim.standable || this.sim.standable(x, z)) to = { x, z };
+    }
+    if (!to) return;
     const me = (v.stroll = {});
-    Promise.race([v.avatar.walkTo(m.x + (Math.random() - 0.5) * 8, m.z + 2 + Math.random() * 4), sleep(30_000)]).finally(() => { if (v.stroll === me) v.stroll = null; });
+    v.avatar.task = task;
+    Promise.race([v.avatar.walkTo(to.x, to.z), sleep(40_000)]).finally(() => {
+      if (v.stroll !== me) return;
+      if (!v.busy && v.avatar) v.avatar.task = 'looking around';
+      // stay a while before wandering on
+      setTimeout(() => { if (v.stroll === me) v.stroll = null; }, 4_000 + Math.random() * 10_000);
+    });
   }
 
   // ---------- Running ----------
@@ -677,7 +693,7 @@ export class Visitors {
       }
       // Closed offers stay visible for a while, then drop off the board.
       for (const [id, o] of this.offers) if (o.closedAt && Date.now() - o.closedAt > 10 * 60_000) this.offers.delete(id);
-      for (const v of this.residents()) if (!v.busy && Math.random() < 0.08) this.#idleToMarket(v);
+      for (const v of this.residents()) if (!v.busy && Math.random() < 0.4) this.#idleToMarket(v);
     }, 5000);
     setInterval(() => this.#collectOverdueFees(), 60_000);
     // The bond contract is the source of truth: a visitor that asked to leave on-chain (or whose bond fell

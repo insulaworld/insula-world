@@ -330,6 +330,7 @@ export class Sim {
   noteShipped(item, n) { this.#fadeGlut(); this.shipped[item] += n; }
   workSpot(who, item) { return this.#spotFor(who, item); }
   dockSpot(who) { return this.#dockSpot(who); }
+  standable(x, z) { return this.#standable(x, z); } // for visitors picking somewhere to wander
   chainError(e, what) { this.#chainError(e, what); }
 
   #release(a, b) {
