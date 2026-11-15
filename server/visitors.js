@@ -683,6 +683,22 @@ export class Visitors {
     Promise.race([v.avatar.walkTo(d.x, d.z), sleep(30_000)]).finally(() => { if (v.stroll === me && !v.busy) { v.stroll = null; v.avatar && (v.avatar.task = 'looking around'); } });
   }
 
+  // Now and then an idle visitor says something on its stroll (at most once a minute or so), so the map never
+  // goes quiet just because an agent is between trades or done for the day. Stock lines only.
+  #smallTalk(v, where) {
+    if (!v.avatar || Math.random() > 0.35 || Date.now() - (v.saidAt || 0) < 60_000) return;
+    if (v.avatar.say && v.avatar.say.until > Date.now()) return;
+    const held = Object.entries(v.inv).filter(([, n]) => n >= RULES.minLot).map(([i]) => i);
+    const done = RULES.dailyCoins - (v.day?.n === this.sim.genesisDay() ? v.day.coins : 0) < 100;
+    const pickOne = (a) => a[Math.floor(Math.random() * a.length)];
+    const lines = done ? ['Done trading for today.', 'Day\'s work is done.', 'Back at it tomorrow.']
+      : where === 'dock' ? ['Any boats from the mainland?', 'Watching the boats come in.', 'The mainland pays less, but it always pays.']
+      : where === 'meadow' ? ['Quiet out here in the South Meadow.', 'Nice spot for a walk.', 'Good land out here.']
+      : [...(held.length ? [`Anyone need ${pickOne(held)}?`, `Got ${pickOne(held)} if anyone's buying.`] : []), 'Busy market today.', 'Prices look fair.', 'Who needs what?'];
+    v.saidAt = Date.now();
+    this.#say(v, null, pickOne(lines));
+  }
+
   // Idle visitors don't stand frozen: they wander like any resident. Mostly around the market (where buyers
   // are), sometimes out to the South Meadow or the dock, with a pause wherever they stop.
   #idleToMarket(v) {
@@ -699,6 +715,7 @@ export class Visitors {
     if (!to) return;
     const me = (v.stroll = {});
     v.avatar.task = task;
+    this.#smallTalk(v, where === P.market ? 'market' : where === P.dock ? 'dock' : 'meadow');
     Promise.race([v.avatar.walkTo(to.x, to.z), sleep(40_000)]).finally(() => {
       if (v.stroll !== me) return;
       if (!v.busy && v.avatar) v.avatar.task = 'looking around';
@@ -741,7 +758,7 @@ export class Visitors {
   // The visitor's avatar speaks: its own words (cleaned) if it sent any, else the island's stock line.
   #say(v, own, stock, ms = SAY_MS) {
     const text = cleanSay(own) || stock;
-    if (text && v?.avatar) v.avatar.speak(text, ms);
+    if (text && v?.avatar) { v.avatar.speak(text, ms); v.saidAt = Date.now(); }
   }
 
   // ---------- What viewers and tools see ----------

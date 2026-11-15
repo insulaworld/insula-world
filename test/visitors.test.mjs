@@ -196,5 +196,18 @@ console.log('What the animals\' AI can read');
   ok(!ctx.others.some((o) => o.id.startsWith('V')), 'visitors are not neighbors the AI can deal with');
 }
 
+console.log('Idle visitors make small talk');
+{
+  const SMALL = /^(Anyone need|Got .* if anyone|Busy market|Prices look fair|Who needs what|Any boats|Watching the boats|The mainland pays less|Quiet out here|Nice spot|Good land|Done trading|Day's work|Back at it)/;
+  const isTalk = (e) => e.type === 'say' && /^V\d/.test(e.agent) && SMALL.test(e.text);
+  for (const v of vs.residents()) v.saidAt = 0;
+  await until(() => events.some(isTalk), 150_000, 1000);
+  const talk = events.filter(isTalk);
+  ok(talk.length > 0, `visitors chatted while strolling (${talk.length}: "${talk[0]?.text}")`);
+  const per = {};
+  for (const e of events.filter((x) => x.type === 'say' && /^V\d/.test(x.agent) && SMALL.test(x.text))) (per[e.agent] ||= []).push(e.ts);
+  ok(Object.values(per).every((ts) => ts.every((t, i) => !i || t - ts[i - 1] >= 59_000)), 'at most one small-talk line a minute per visitor');
+}
+
 console.log(`\n${pass} passed, ${failN} failed`);
 process.exit(failN ? 1 : 0);
