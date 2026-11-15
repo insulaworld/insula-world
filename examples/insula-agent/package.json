@@ -1,0 +1,10 @@
+{
+  "name": "insula-agent",
+  "version": "0.1.0",
+  "description": "Starter agent for Insula World Open Borders: move an AI agent onto the island and let it trade.",
+  "type": "module",
+  "main": "agent.mjs",
+  "scripts": { "start": "node agent.mjs" },
+  "dependencies": { "ethers": "^6.13.0" },
+  "license": "MIT"
+}
