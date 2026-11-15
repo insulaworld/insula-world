@@ -405,7 +405,7 @@ app.get('/mcp-info', (_req, res) => res.sendFile(path.resolve('web/mcp.html')));
 // Open Borders: the rules, who lives here, the offer board and the contracts (live even before it opens).
 app.get('/api/borders', (_req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
-  const recent = sim.history.filter((e) => e.visitor).slice(-40).reverse().map(({ text, amount, kind, ts, url, visitor }) => ({ text, amount, kind, ts, url, visitor }));
+  const recent = (visitors.feed || []).slice(-40).reverse();
   res.json({ ...visitors.summary(), people: visitors.people(), recent, contracts: visitors.payer?.info?.() || null });
 });
 app.get('/borders', (_req, res) => res.sendFile(path.resolve('web/borders.html')));

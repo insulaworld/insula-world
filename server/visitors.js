@@ -81,6 +81,15 @@ export class Visitors {
     this.totals = saved?.totals || { entries: 0, fees: 0, burned: 0, trades: 0, volume: 0 };
     this.savedGuard = saved?.guard || null; // used request nonces from before a restart (see RequestGuard)
     this.savedWatch = saved?.watch || null;
+    // Open Borders' own activity feed (the island's shared history only keeps its last 80 events, so
+    // visitor events would scroll away in minutes). Kept here and saved, so it survives restarts too.
+    this.feed = saved?.feed || [];
+    sim.on?.((e) => {
+      if (!e?.visitor || !['trade', 'log'].includes(e.type)) return;
+      const { text, amount, kind, ts, url, visitor } = e;
+      this.feed.push({ text, amount, kind, ts: ts || Date.now(), url, visitor });
+      if (this.feed.length > 200) this.feed.splice(0, this.feed.length - 200);
+    });
     this.closedReason = null;
     for (const r of saved?.list || []) this.#add({ ...r, busy: false, task: null });
     for (const o of saved?.offers || []) if (o.status === 'open' || o.status === 'taken') this.offers.set(o.id, { ...o, status: 'open', taker: null });
@@ -754,7 +763,7 @@ export class Visitors {
 
   save() {
     return {
-      seq: this.seq, offerSeq: this.offerSeq, animalDay: this.animalDay, pool: this.pool, totals: this.totals, payer: this.payer?.save?.(), guard: this.guard?.save?.(), watch: this.watch?.save?.(),
+      seq: this.seq, offerSeq: this.offerSeq, feed: this.feed.slice(-200), animalDay: this.animalDay, pool: this.pool, totals: this.totals, payer: this.payer?.save?.(), guard: this.guard?.save?.(), watch: this.watch?.save?.(),
       list: [...this.list.values()].map(({ avatar, busy, stroll, lastAt, task, ...r }) => ({ ...r, x: avatar?.x ?? null, z: avatar?.z ?? null })),
       offers: [...this.offers.values()].filter((o) => o.status === 'open' || o.status === 'taken'),
     };
