@@ -8,8 +8,8 @@
 //  1. The contract holds at least what it owes (token balance >= totalBonded).
 //  2. Every Slashed event was sent by this server (a slash it didn't send means the operator key is in use
 //     somewhere else).
-//  3. The operator is still the bank, and nobody has queued a new operator or payee (that would mean the owner
-//     key was used; legitimate changes are rare, and the alarm is a prompt to check).
+//  3. The operator is still the bank, and nobody has queued a new operator, or a payee that isn't one of the
+//     island's animals (that would mean the owner key was used; the alarm is a prompt to check).
 //  4. The bank still has ETH for visitors' gas.
 
 import { Contract, Interface, JsonRpcProvider, getAddress, formatUnits, id as topicOf } from 'ethers';
@@ -70,6 +70,11 @@ export class BondWatch {
     return out;
   }
 
+  #isAnimal(addr) {
+    const ids = Object.keys(this.sim?.agents || {});
+    return ids.some((id) => { try { return getAddress(this.payer.chain.addressOf(id)) === getAddress(addr); } catch { return false; } });
+  }
+
   #trip(reason) {
     if (this.alarm) return;
     this.alarm = { reason, at: Date.now() };
@@ -94,7 +99,11 @@ export class BondWatch {
         const ev = IFACE.parseLog(log);
         if (ev.name === 'Slashed' && !this.payer.mySlashes.has(log.transactionHash.toLowerCase())) this.#trip(`a slash the island didn't send (${log.transactionHash})`);
         if (ev.name === 'OperatorQueued') this.#trip(`the owner queued a new operator (${ev.args.operator})`);
-        if (ev.name === 'PayeeQueued') this.#trip(`the owner queued a new payee (${ev.args.payee})`);
+        // Adding one of the island's own animals (a newcomer like Gus) is expected; anything else is an alarm.
+        if (ev.name === 'PayeeQueued') {
+          if (this.#isAnimal(ev.args.payee)) console.log(`[bond-watch] ${ev.args.payee} (an island animal) queued as a payee`);
+          else this.#trip(`the owner queued a new payee (${ev.args.payee})`);
+        }
         if (ev.name === 'OwnershipTransferStarted') this.#trip(`the owner started handing over ownership (to ${ev.args.to})`);
       }
       this.from = head + 1;
