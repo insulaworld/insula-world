@@ -85,10 +85,20 @@ async function signAll(s) {
   }
   return auth;
 }
+// The island takes one action every 2 seconds per agent: space them out, and if told to slow down, wait and retry.
+let lastAct = 0;
 async function signed(name, a) {
-  const s = await tool(name, { address: A, ...a });
-  if (s.status !== 'signature_required') return s;
-  return tool(name, { address: A, ...a, auth: await signAll(s) });
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const gap = 2600 - (Date.now() - lastAct);
+    if (gap > 0) await sleep(gap);
+    const s = await tool(name, { address: A, ...a });
+    if (s.status !== 'signature_required') return s;
+    const r = await tool(name, { address: A, ...a, auth: await signAll(s) });
+    lastAct = Date.now();
+    if (r.isError && r.error === 'slow_down') { say('    (island asked to slow down; retrying)'); continue; }
+    return r;
+  }
+  return { isError: true, error: 'slow_down', message: 'still rate-limited after 3 tries' };
 }
 const show = (label, r) => {
   if (r.isError) { say(`  ✗ ${label}: ${r.error || ''} ${r.message || r.text || ''}`.trim()); return false; }
@@ -155,24 +165,26 @@ async function tour() {
   show('offer board', board);
   const m = board.market || {};
   // 1. Buy 6 fish from the mainland.
-  show('dock: buy 6 fish', await signed('dock_trade', { side: 'buy', item: 'fish', qty: 6 }));
+  const before = await tool('my_visitor', { address: A });
+  if ((before.inv?.fish || 0) >= 6) say('  already holding fish from a previous run; skipping the dock buy');
+  else show('dock: buy 6 fish', await signed('dock_trade', { side: 'buy', item: 'fish', qty: 6 }));
   // 2. Offer those 6 fish to the animals, a touch under the island price so someone takes it.
   const price = Math.max(1, Math.round((m.fish || 12) * 0.95));
   const o = await signed('post_offer', { side: 'sell', item: 'fish', qty: 6, price });
-  show(`offer: sell 6 fish at ${price}`, o);
+  const posted = show(`offer: sell 6 fish at ${price}`, o);
   // 3. Wait for an animal to take it (up to WAIT_MIN minutes).
-  const until = Date.now() + Number(env('WAIT_MIN', 10)) * 60_000;
-  say(`  waiting up to ${env('WAIT_MIN', 10)} min for an animal to take the offer…`);
+  const until = posted ? Date.now() + Number(env('WAIT_MIN', 10)) * 60_000 : 0;
+  if (posted) say(`  waiting up to ${env('WAIT_MIN', 10)} min for an animal to take the offer…`);
   let filled = false;
   while (Date.now() < until) {
     const s = await tool('my_visitor', { address: A });
     if (!s.isError && !(s.offers || []).some((x) => x.status === 'open' || x.open)) { filled = true; break; }
     await sleep(20_000);
   }
-  say(filled ? '  ✓ the offer closed (taken or expired, see my status)' : '  … still open; it will expire on its own (cancel <offerId> to pull it)');
+  if (posted) say(filled ? '  ✓ the offer closed (taken or expired, see my status)' : '  … still open; it will expire on its own (cancel <offerId> to pull it)');
   // 4. Gather a load of ore, then sell it at the dock.
   const g = await signed('gather', { item: 'ore' });
-  show('gather ore', g);
+  if (!show('gather ore', g)) { await me(); return; }
   const want = g.qty || 8;
   say(`  waiting for the trip to finish (about ${g.etaSeconds || 60}s)…`);
   for (let i = 0; i < 40; i++) { const s = await tool('my_visitor', { address: A }); if ((s.inv?.ore || 0) >= want) break; await sleep(Math.max(3000, ((g.etaSeconds || 60) * 1000) / 10)); }
