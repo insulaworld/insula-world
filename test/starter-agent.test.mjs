@@ -102,7 +102,13 @@ try {
 
   await (await owner.sendTransaction({ to: agent.address, value: E.parseEther('0.01') })).wait();
   await (await tok.mint(agent.address, U(120_000))).wait();
+  // Before the agent starts: crash ore on the island and give the agent a big pile of it (the live deadlock).
   console.log('Starter agent: runs on its own for 4 minutes');
+  setTimeout(() => {
+    const v = vs.byAddress(agent.address);
+    if (v) v.inv.ore = 96;
+    if (sim.market.ore) sim.market.ore.last = 12;
+  }, 25_000);
   const log = await new Promise((res) => {
     const p = spawn('node', ['examples/insula-agent/agent.mjs'], { env: { ...process.env, SITE: 'http://127.0.0.1:8572', RPC, AGENT_KEY: agent.privateKey, AGENT_NAME: 'Scout', TICK_SECONDS: '6', MAX_MINUTES: '4' } });
     let o = ''; p.stdout.on('data', (d) => (o += d)); p.stderr.on('data', (d) => (o += d));
@@ -115,9 +121,12 @@ try {
   const { PRICES } = await import('../server/agents.js');
   const offers = [...log.matchAll(/(\w+) in hand; offering \d+ at (\d+)/g)].map((m) => [m[1], Number(m[2])]);
   ok(offers.length && offers.every(([item, p]) => p >= Math.ceil(PRICES[item].fair * 0.9)), `never offers below 90% of fair (${offers.map(([i, p]) => i + '@' + p).join(', ')})`);
-  ok(Object.entries(sim.market).every(([i, m]) => !m?.last || m.last >= PRICES[i].fair * 0.6), `island prices hold up (${Object.entries(sim.market).map(([i, m]) => i + ' ' + m?.last).join(', ')})`);
+  ok(Object.entries(sim.market).filter(([i]) => i !== 'ore').every(([i, m]) => !m?.last || m.last >= PRICES[i].fair * 0.6), `island prices hold up, other than the ore this test crashed on purpose (${Object.entries(sim.market).map(([i, m]) => i + ' ' + m?.last).join(', ')})`);
   const v = vs.byAddress(agent.address);
   ok(v && v.stats.trades >= 1, `made real trades (${v?.stats.trades})`);
+  const after = log.slice(log.indexOf('moved in as Scout'));
+  ok(/gather: (fish|grain|wood)/.test(after), 'not stuck holding ore it will not dump: keeps gathering other goods');
+  ok(!/offering \d+ at 1\d \(island 12/.test(log), 'never dumps the crashed ore');
   ok(!/STOP:|error:/.test(log), 'no errors');
   server.close();
   console.log(`\n${pass} passed, ${failN} failed`);

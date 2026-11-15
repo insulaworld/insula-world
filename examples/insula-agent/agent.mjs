@@ -120,10 +120,10 @@ function decide({ me, board, gatheringUntil }) {
     const ship = mainland[item]?.buysAt || 0;
     if (ship >= (fair[item] || 0) * 0.7) return { tool: 'dock_trade', args: { side: 'sell', item, qty: Math.min(have, 40) }, why: `island ${item} is oversupplied; the mainland pays ${ship}` };
   }
-  // 4. Nothing to sell: gather whatever is scarcest (highest price compared with fair), if hands aren't full.
+  // 4. Nothing to sell right now: gather whatever is scarcest (highest price compared with fair), skipping
+  //    goods it already holds plenty of. Stock waiting for its price to recover never blocks other work.
   if (Date.now() < gatheringUntil) return null;
-  if (Object.values(me.inv || {}).reduce((t, n) => t + n, 0) >= 12) return null;     // holding enough already
-  const best = Object.keys(market).filter((i) => market[i] && fair[i]).sort((x, y) => market[y] / fair[y] - market[x] / fair[x])[0];
+  const best = Object.keys(market).filter((i) => market[i] && fair[i] && (me.inv?.[i] || 0) < 12).sort((x, y) => market[y] / fair[y] - market[x] / fair[x])[0];
   if (best) return { tool: 'gather', args: { item: best }, why: `${best} is scarcest right now (${market[best]} vs fair ${fair[best]})` };
   return null;
 }
