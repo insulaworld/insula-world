@@ -126,7 +126,7 @@ try {
   ok(v && v.stats.trades >= 1, `made real trades (${v?.stats.trades})`);
   const after = log.slice(log.indexOf('moved in as Scout'));
   ok(/gather: (fish|grain|wood)/.test(after), 'not stuck holding ore it will not dump: keeps gathering other goods');
-  ok(!/offering \d+ at 1\d \(island 12/.test(log), 'never dumps the crashed ore');
+  ok(!/ore in hand; offering/.test(after), 'never dumps the crashed ore (no ore offered while its price is under the floor)');
   ok(!/STOP:|error:/.test(log), 'no errors');
   server.close();
   console.log(`\n${pass} passed, ${failN} failed`);
