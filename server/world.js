@@ -2,6 +2,8 @@
 // The world is the original harbor island plus three zones that unlock over the first month:
 // Farm Valley (east), West Hill (a second, richer mine) and North Beach.
 
+import { spreadLayout } from './layout.js';
+
 export function mulberry32(seed) {
   let a = seed >>> 0;
   return () => {
@@ -170,7 +172,7 @@ export function generateWorld({ seed = 1337 } = {}) {
   const pier = pierLayout(heights, WATER_LEVEL, dock);
   const grown = expandCoast({ seed, heights, size, pier, sites, rand: mulberry32(seed ^ 0x51ab1e), market, trees, plots, zoneOf });
 
-  return {
+  return spreadLayout({
     size: grown.size,
     seed,
     waterLevel: WATER_LEVEL,
@@ -191,7 +193,7 @@ export function generateWorld({ seed = 1337 } = {}) {
     ores2,
     trees,
     plots,
-  };
+  }, { WATER_LEVEL, ZONE_DEFS, zoneOf });
 }
 
 // Size of the map after the coast expansion. The original island used 88x88; the map grows to the east and

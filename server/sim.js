@@ -5,6 +5,7 @@
 
 import { Reporter } from './daily.js';
 import { groundY, zoneAt } from './world.js';
+import { relocate, LAYOUT_VERSION } from './layout.js';
 import {
   AGENT_DEFS, PRICES, MAINLAND, RESOURCES, ITEMS, CARRY, FOOD, LOAN, BUILDINGS, PROJECTS,
   HOUSE_HUNGER_SKIP, WORKSHOP_BOOST, START_COINS, upgradeCost,
@@ -263,6 +264,15 @@ export class Sim {
       if (savedAgents[id]) Object.assign(a, savedAgents[id], { inv: { ore: 0, fish: 0, wood: 0, grain: 0, ...savedAgents[id].inv } });
       this.agents[id] = a;
     });
+    // A saved island from the old, cramped plan: move its buildings onto the spacious one, once.
+    this.layout = saved?.layout ?? (saved ? 1 : LAYOUT_VERSION);
+    if (saved && this.layout < LAYOUT_VERSION && world.layout === LAYOUT_VERSION) {
+      const { taken, moved } = relocate({ world, buildings: this.buildings, jobs: this.jobs, agents: Object.values(this.agents) });
+      this.takenPlots = taken;
+      this.layout = LAYOUT_VERSION;
+      this.relocated = moved.length;
+      console.log(`[layout] spread the island out: ${moved.length} buildings moved to the spacious plan`);
+    }
   }
 
   // ---------- Events ----------
@@ -430,7 +440,7 @@ export class Sim {
 
   serialize() {
     return {
-      version: 2,
+      version: 2, layout: this.layout,
       genesis: this.genesis, started: this.started, savedAt: Date.now(),
       visitors: this.visitors ? this.visitors.save() : this.savedVisitors || undefined,
       market: this.market, decisions: this.decisions, loans: this.loans, jobs: this.jobs, buildings: this.buildings,
