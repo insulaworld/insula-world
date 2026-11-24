@@ -1538,6 +1538,45 @@ $('#feed .feed-head').addEventListener('click', (ev) => {
   document.body.classList.toggle('feed-open', open);
 });
 // Tapping an agent's card follows that agent with the camera (tap again to go back to the island).
+// The cast row scrolls sideways once there are more agents than fit: arrows and a soft fade show when cards
+// are off-screen, and the mouse wheel scrolls the row.
+(() => {
+  const row = $('#agents');
+  const mk = (dir) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = `cast-arrow ${dir} ui`;
+    b.hidden = true;
+    b.setAttribute('aria-label', dir === 'l' ? 'More agents to the left' : 'More agents to the right');
+    b.textContent = dir === 'l' ? '\u2039' : '\u203A';
+    b.addEventListener('click', () => row.scrollBy({ left: (dir === 'l' ? -1 : 1) * row.clientWidth * 0.8, behavior: 'smooth' }));
+    document.body.appendChild(b);
+    return b;
+  };
+  const L = mk('l'), R = mk('r');
+  const sync = () => {
+    const max = row.scrollWidth - row.clientWidth;
+    const l = row.scrollLeft > 4, r = row.scrollLeft < max - 4;
+    row.classList.toggle('more-l', l);
+    row.classList.toggle('more-r', r);
+    L.hidden = !l;
+    R.hidden = !r;
+    const rc = row.getBoundingClientRect();
+    L.style.left = `${rc.left + 6}px`;
+    R.style.left = `${rc.right - 40}px`;
+    L.style.top = R.style.top = `${rc.top + rc.height / 2 - 17}px`;
+  };
+  row.addEventListener('scroll', sync, { passive: true });
+  row.addEventListener('wheel', (e) => {
+    if (Math.abs(e.deltaY) <= Math.abs(e.deltaX) || row.scrollWidth <= row.clientWidth) return;
+    row.scrollLeft += e.deltaY;
+    e.preventDefault();
+  }, { passive: false });
+  if (window.ResizeObserver) new ResizeObserver(sync).observe(row);
+  new MutationObserver(sync).observe(row, { childList: true });
+  addEventListener('resize', sync);
+  setInterval(sync, 1500);
+})();
 $('#agents').addEventListener('click', (ev) => {
   const card = ev.target.closest('.card');
   const prof = ev.target.closest('[data-profile]');

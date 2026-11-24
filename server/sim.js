@@ -163,7 +163,18 @@ export class Agent {
     // Safety net: an animal that hasn't actually moved for 3 seconds, or has been walking to the same
     // place for 40 seconds, is allowed straight through for a moment so it can never get stuck.
     if (!this.progressAt || dist(this, this.progressPos) > 0.3) { this.progressAt = now; this.progressPos = { x: this.x, z: this.z }; }
-    else if (now - this.progressAt > 3000) { this.ghostUntil = now + 3000; this.progressAt = now; }
+    else if (now - this.progressAt > 3000) {
+      // Stuck within arm's reach of a spot someone else is standing near (the personal-space nudge keeps
+      // them apart): close enough, count it as arrived. Further off, walk straight through for a moment.
+      if (!this.follow && d < PERSONAL_SPACE + 0.4) {
+        this.target = null;
+        const r = this.arrive;
+        this.arrive = null;
+        r?.();
+        return;
+      }
+      this.ghostUntil = now + 3000; this.progressAt = now;
+    }
     if (this.walkSince && now - this.walkSince > 40_000) { this.ghostUntil = now + 3000; this.walkSince = now; }
   }
 
@@ -650,6 +661,8 @@ export class Sim {
 
   // ---------- Main loops ----------
 
+  nudgeApart(dt) { this.#separate(dt); } // for tests: the personal-space nudge on its own
+
   start() {
     let last = Date.now();
     setInterval(() => {
@@ -945,6 +958,20 @@ export class Sim {
     return this.pierSpots[Math.max(0, ids.indexOf(agent.id)) % this.pierSpots.length];
   }
 
+  // North Beach: each agent has its own place on the North Harbor pier (sides and end, casting outward), so
+  // fishers there stand apart instead of all heading for one point and jostling forever.
+  #harborSpot(agent) {
+    const b = this.world.places.beach, x0 = b.x, z0 = b.z - 6;
+    if (!this.harborSpots) {
+      const spots = [];
+      for (const dz of [0, -2, 2, -4]) spots.push({ x: x0 - 1.7, z: z0 + dz, face: { x: x0 - 5, z: z0 + dz } }, { x: x0 + 1.7, z: z0 + dz, face: { x: x0 + 5, z: z0 + dz } });
+      spots.push({ x: x0 - 0.8, z: z0 - 5.3, face: { x: x0 - 0.8, z: z0 - 9 } }, { x: x0 + 0.8, z: z0 - 5.3, face: { x: x0 + 0.8, z: z0 - 9 } });
+      this.harborSpots = spots;
+    }
+    const ids = Object.keys(this.agents);
+    return this.harborSpots[Math.max(0, ids.indexOf(agent.id)) % this.harborSpots.length];
+  }
+
   // Each agent has its own place along the shore by the dock (land tiles at about dock height), so a
   // crowd at the dock stands side by side instead of on one tile.
   #dockSpot(agent) {
@@ -979,7 +1006,7 @@ export class Sim {
     }
     if (item === 'fish') {
       const north = this.zonesOpen().has('north') && (agent.homeZone === 'north' || Math.random() < 0.3);
-      if (north) return { x: w.places.beach.x, z: w.places.beach.z - 6, face: { x: w.places.beach.x, z: w.places.beach.z - 12 } };
+      if (north) return this.#harborSpot(agent);
       const ps = this.#pierSpot(agent);
       if (ps) return ps;
       const d = this.#dockSpot(agent);

@@ -79,6 +79,14 @@ button.chip.active { color: var(--ink); background: rgba(255, 255, 255, 0.92); }
 
 /* ---------- Cast cards ---------- */
 #agents { position: fixed; left: var(--gutter-l); bottom: var(--gutter-b); display: flex; gap: 8px; max-width: calc(100% - 420px); overflow-x: auto; scrollbar-width: none; }
+#agents::-webkit-scrollbar { display: none; }
+#agents.more-r { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 70px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 70px), transparent); }
+#agents.more-l { -webkit-mask-image: linear-gradient(90deg, transparent, #000 70px); mask-image: linear-gradient(90deg, transparent, #000 70px); }
+#agents.more-l.more-r { -webkit-mask-image: linear-gradient(90deg, transparent, #000 70px, #000 calc(100% - 70px), transparent); mask-image: linear-gradient(90deg, transparent, #000 70px, #000 calc(100% - 70px), transparent); }
+.cast-arrow { position: fixed; z-index: 6; width: 34px; height: 34px; padding: 0; border-radius: 50%; border: 1px solid var(--line); background: var(--glass); color: var(--text); font-size: 22px; line-height: 30px; cursor: pointer; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.cast-arrow:hover { background: rgba(255, 255, 255, 0.92); color: var(--ink); }
+.cast-arrow[hidden] { display: none; }
+body.feed-open .cast-arrow { display: none; }
 .card {
   flex: none; width: 206px; background: var(--glass); border: 1px solid var(--line); border-radius: 16px; padding: 12px 13px 10px;
   backdrop-filter: blur(16px) saturate(140%); -webkit-backdrop-filter: blur(16px) saturate(140%);
@@ -626,3 +634,6 @@ body.walking #scene canvas { touch-action: none; }
 /* Outside validation (ERC-8004): shown once a validator such as Hey Research has answered on-chain */
 a#valid-link { color: #10131a; background: var(--mint); border-color: transparent; font-weight: 600; text-decoration: none; }
 a#valid-link:hover { filter: brightness(1.08); }
+
+/* Wide screens: slightly narrower cast cards, so more of the cast fits before the row scrolls */
+@media (min-width: 1400px) { .card { width: 192px; } }
