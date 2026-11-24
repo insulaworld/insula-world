@@ -4,7 +4,7 @@
 process.env.LLM = 'off';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { generateWorld } from '../server/world.js';
+import { generateWorld, groundY, harborDeck } from '../server/world.js';
 import { Sim } from '../server/sim.js';
 
 const world = generateWorld({ seed: 1337 });
@@ -30,15 +30,36 @@ test('four animals walking to one point all arrive within a few seconds', async 
   assert.equal(arrived.size, 4, `${arrived.size} of 4 arrived in ${Date.now() - t0} ms`);
 });
 
-test('North Beach fishers each get their own spot', () => {
+test('North Beach fishers stand on the North Harbor deck, each on their own boards', () => {
   const sim = new Sim(world, chain, {});
   sim.unlocked.add('north');
+  const hs = world.sites.harbor;
+  const hb = { id: 9001, kind: 'project', type: 'harbor', level: 1, progress: 1, owner: null, x: hs.x, z: hs.z, y: world.heights[hs.x][hs.z] };
+  sim.buildings.push(hb);
+  sim._solidsAt = 0;
+  const deck = harborDeck(hb), onDeck = new Set(deck.tiles.map(([a, b]) => `${a},${b}`));
   const spots = Object.values(sim.agents).map((a) => { a.homeZone = 'north'; return sim.workSpot(a, 'fish'); });
   const keys = new Set(spots.map((s) => `${s.x},${s.z}`));
-  assert.ok(keys.size >= Math.min(spots.length, 10), `${keys.size} distinct spots for ${spots.length} fishers`);
+  assert.ok(keys.size >= Math.min(spots.length, 7), `${keys.size} distinct spots for ${spots.length} fishers`);
+  for (const s of spots) {
+    assert.ok(onDeck.has(`${Math.round(s.x)},${Math.round(s.z)}`), `spot ${s.x},${s.z} is on the deck`);
+    assert.equal(groundY(world, s.x, s.z), Math.max(deck.top, world.heights[Math.round(s.x)][Math.round(s.z)] + 1), 'stands on top of the boards');
+    assert.ok(sim.standable(s.x, s.z), `spot ${s.x},${s.z} is walkable`);
+  }
   for (let i = 0; i < spots.length; i++)
     for (let j = i + 1; j < spots.length; j++) {
       const d = Math.hypot(spots[i].x - spots[j].x, spots[i].z - spots[j].z);
       if (d > 0) assert.ok(d >= 1.5, `spots ${i} and ${j} are ${d.toFixed(2)} apart`);
     }
+});
+
+test('before the North Harbor is built, North Beach fishers use the main pier', () => {
+  const w2 = generateWorld({ seed: 1337 });
+  const sim = new Sim(w2, chain, {});
+  sim.unlocked.add('north');
+  const a = Object.values(sim.agents)[0];
+  a.homeZone = 'north';
+  const s = sim.workSpot(a, 'fish');
+  const pier = new Set(w2.places.dock.pier.tiles.map(([x, z]) => `${x},${z}`));
+  assert.ok(pier.has(`${Math.round(s.x)},${Math.round(s.z)}`), `spot ${s.x},${s.z} is on the main pier`);
 });

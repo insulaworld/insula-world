@@ -2181,7 +2181,8 @@ function blueprint(b, level) {
       out.push([-1, 1, 0, 0xb98349], [1, 1, 0, 0xb98349], [0, 1, -1, 0xe8c45a], [0, 1, 1, 'glow']);
       break;
     case 'harbor':
-      for (let z = 1; z <= 7; z++) for (let x = -2; x <= 2; x++) if (Math.abs(x) < 2 || z % 2) out.push([x, -1, -z, z % 2 ? 0xb98349 : 0x93623a]);
+      // Boards only where there's no land at deck height (the coast grew under the inner end): no doubled faces.
+      for (let z = 1; z <= 7; z++) for (let x = -2; x <= 2; x++) if ((Math.abs(x) < 2 || z % 2) && (world.heights[b.x + x]?.[b.z - z] ?? 0) < b.y) out.push([x, -1, -z, z % 2 ? 0xb98349 : 0x93623a]);
       for (let y = 0; y < 6; y++) out.push([2, y, -2, 0xf2c230]);
       for (let z = 2; z <= 5; z++) out.push([2, 6, -z, 0xf2c230]);
       out.push([2, 5, -5, 0x2a2a2a], [-1, 0, -2, 0x7a4a26], [-1, 1, -2, 0x7a4a26], [0, 0, -3, 0x8a5a33], [-2, 0, 0, 'glow']);

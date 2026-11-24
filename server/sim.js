@@ -4,7 +4,7 @@
 // opens new land, new buildings, public works and new arrivals as the economy earns them.
 
 import { Reporter } from './daily.js';
-import { groundY, zoneAt } from './world.js';
+import { groundY, zoneAt, harborDeck } from './world.js';
 import { relocate, LAYOUT_VERSION } from './layout.js';
 import {
   AGENT_DEFS, PRICES, MAINLAND, RESOURCES, ITEMS, CARRY, FOOD, LOAN, BUILDINGS, PROJECTS,
@@ -547,12 +547,26 @@ export class Sim {
   solids() {
     if (this._solidsAt && Date.now() - this._solidsAt < 2000) return this._solids;
     this._solidsAt = Date.now();
+    this.#syncNorthPier();
     this._solids = this.buildings.filter((b) => b.type !== 'harbor' && b.x != null).map((b) => {
       const half = (b.kind === 'project' && BIG_PROJECTS.has(b.type) ? 2.5 : 1.5) + WALL_PAD;
       return { x: b.x, z: b.z, half };
     });
     return this._solids;
   }
+
+  // Once the North Harbor is built its deck is walkable ground (agents stand on the boards, not the sand or
+  // water under them). Kept off the saved/served world (non-enumerable); groundY reads it.
+  #syncNorthPier() {
+    const hb = this.buildings.find((b) => b.type === 'harbor' && b.x != null && b.progress >= 1);
+    const key = hb ? `${hb.x},${hb.z},${hb.y}` : null;
+    if ((this.world.northPier?.key ?? null) === key) return;
+    let val = null;
+    if (hb) { const d = harborDeck(hb); val = { key, hb, top: d.top, set: new Set(d.tiles.map(([a, b]) => `${a},${b}`)) }; }
+    Object.defineProperty(this.world, 'northPier', { value: val, writable: true, configurable: true, enumerable: false });
+    this.harborSpots = null;
+  }
+  #onNorthPier(xi, zi) { return Boolean(this.world.northPier?.set.has(`${xi},${zi}`)); }
 
   // Where to head next on the way to `goal`: straight there when no building is in the way, otherwise the
   // corner (just outside the walls) of the first building on the line that makes the shortest detour.
@@ -625,7 +639,7 @@ export class Sim {
   #dry(x, z) {
     const w = this.world, xi = Math.round(x), zi = Math.round(z);
     if (xi < 0 || zi < 0 || xi >= w.size || zi >= w.size) return false;
-    return w.heights[xi][zi] >= w.waterLevel || Boolean(w.places?.dock?.pier?.tiles.some(([a, b]) => a === xi && b === zi)); // sand beach counts as dry
+    return w.heights[xi][zi] >= w.waterLevel || this.#onNorthPier(xi, zi) || Boolean(w.places?.dock?.pier?.tiles.some(([a, b]) => a === xi && b === zi)); // sand beach counts as dry
   }
 
   // Land or pier, not open water, and not inside a building.
@@ -634,6 +648,7 @@ export class Sim {
     if (xi < 0 || zi < 0 || xi >= w.size || zi >= w.size) return false;
     if (this.#insideSolid(x, z)) return false;
     if (w.heights[xi][zi] >= w.waterLevel) return true; // grass or sand beach; only open water is off-limits
+    if (this.#onNorthPier(xi, zi)) return true;
     return Boolean(w.places?.dock?.pier?.tiles.some(([a, b]) => a === xi && b === zi));
   }
 
@@ -958,15 +973,16 @@ export class Sim {
     return this.pierSpots[Math.max(0, ids.indexOf(agent.id)) % this.pierSpots.length];
   }
 
-  // North Beach: each agent has its own place on the North Harbor pier (sides and end, casting outward), so
-  // fishers there stand apart instead of all heading for one point and jostling forever.
+  // North Beach: each agent has its own place on the North Harbor deck (the far end and the outer boards,
+  // clear of the crane, posts and crate), so fishers stand on the boards, apart, casting over the water.
+  // Before the harbor is built there's nowhere to stand out there, so they fish from the main pier instead.
   #harborSpot(agent) {
-    const b = this.world.places.beach, x0 = b.x, z0 = b.z - 6;
+    this.solids();
+    const hb = this.world.northPier?.hb;
+    if (!hb) return null;
     if (!this.harborSpots) {
-      const spots = [];
-      for (const dz of [0, -2, 2, -4]) spots.push({ x: x0 - 1.7, z: z0 + dz, face: { x: x0 - 5, z: z0 + dz } }, { x: x0 + 1.7, z: z0 + dz, face: { x: x0 + 5, z: z0 + dz } });
-      spots.push({ x: x0 - 0.8, z: z0 - 5.3, face: { x: x0 - 0.8, z: z0 - 9 } }, { x: x0 + 0.8, z: z0 - 5.3, face: { x: x0 + 0.8, z: z0 - 9 } });
-      this.harborSpots = spots;
+      const at = (dx, dz, fx, fz) => ({ x: hb.x + dx, z: hb.z + dz, face: { x: hb.x + dx + fx, z: hb.z + dz + fz } });
+      this.harborSpots = [at(0, -7, 0, -4), at(-2, -7, 0, -4), at(2, -7, 0, -4), at(-1, -5.4, -4, 0), at(1, -5.4, 4, 0), at(-1, -3.7, -4, 0), at(1, -3.7, 4, 0)];
     }
     const ids = Object.keys(this.agents);
     return this.harborSpots[Math.max(0, ids.indexOf(agent.id)) % this.harborSpots.length];
@@ -1006,7 +1022,8 @@ export class Sim {
     }
     if (item === 'fish') {
       const north = this.zonesOpen().has('north') && (agent.homeZone === 'north' || Math.random() < 0.3);
-      if (north) return this.#harborSpot(agent);
+      const hs = north && this.#harborSpot(agent);
+      if (hs) return hs;
       const ps = this.#pierSpot(agent);
       if (ps) return ps;
       const d = this.#dockSpot(agent);

@@ -311,10 +311,20 @@ export function pierLayout(heights, waterLevel, d) {
   return { ax, az, first, len, top, tiles };
 }
 
+// The North Harbor's deck (the 'harbor' public project): boards from just off the beach out over the water,
+// the same tiles the site draws. Agents walk on top of it once it's built.
+export function harborDeck(b) {
+  const tiles = [];
+  for (let z = 1; z <= 7; z++) for (let x = -2; x <= 2; x++) if (Math.abs(x) < 2 || z % 2) tiles.push([b.x + x, b.z - z]);
+  return { tiles, top: b.y + 1 };
+}
+
 const pierIndex = new WeakMap();
 export function groundY(world, x, z) {
   const xi = Math.min(world.size - 1, Math.max(0, Math.round(x)));
   const zi = Math.min(world.size - 1, Math.max(0, Math.round(z)));
+  const north = world.northPier;
+  if (north?.set.has(`${xi},${zi}`)) return Math.max(north.top, Math.max(world.heights[xi][zi], world.waterLevel) + 1);
   const pier = world.places?.dock?.pier;
   if (pier) {
     if (!pierIndex.has(world)) pierIndex.set(world, new Set(pier.tiles.map(([a, b]) => `${a},${b}`)));
