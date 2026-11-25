@@ -20,6 +20,7 @@ import { Sim } from './sim.js';
 import { llmStats, llmUsage } from './brain.js';
 import { DEFAULT_DAY_MS } from './eras.js';
 import { Relations } from './relations.js';
+import { Passports } from './passport.js';
 
 const PORT = Number(process.env.PORT || 3000);
 const DAY_MS = Number(process.env.INSULA_DAY_MS || DEFAULT_DAY_MS);
@@ -409,6 +410,16 @@ app.get('/api/borders', (_req, res) => {
   res.json({ ...visitors.summary(), people: visitors.people(), recent, contracts: visitors.payer?.info?.() || null });
 });
 app.get('/borders', (_req, res) => res.sendFile(path.resolve('web/borders.html')));
+// Agent passports: one shareable page per agent (animal or visitor) with its identity, reputation, credit,
+// bond and recent on-chain deals, each linked to the chain.
+const passports = new Passports({ sim, identity, reputation, credit, relations, visitors, validation });
+app.get('/api/passport', (_req, res) => { res.set('Access-Control-Allow-Origin', '*'); res.json({ agents: passports.list() }); });
+app.get('/api/passport/:who', (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  const p = passports.get(req.params.who);
+  return p ? res.json(p) : res.status(404).json({ error: 'No agent on Insula matches that name or id.' });
+});
+app.get(['/agent', '/agent/:who'], (_req, res) => res.sendFile(path.resolve('web/agent.html')));
 
 sim.on((e) => { if (e.type === 'chainError') chainErrors++; });
 function gini(xs) {

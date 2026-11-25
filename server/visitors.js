@@ -358,6 +358,7 @@ export class Visitors {
       try {
         await this.payer.slash({ address: v.address, legs: this.#feeLegs(amount), reason: 'unpaid-fees', memo: `Insula visitor ${v.id} | unpaid market fees from the bond` });
         v.owed = v.owed.filter((f) => !late.includes(f));
+        v.slashed = (v.slashed || 0) + amount; // shown on the visitor's passport
         v.stats.fees += amount;
         this.#countFee(amount);
         this.sim.log(`${amount} coins of unpaid market fees were taken from visitor ${v.id}'s bond.`);
@@ -766,7 +767,7 @@ export class Visitors {
   #public(v) {
     return {
       id: v.id, agentId: v.agentId, name: v.name, look: v.look, color: v.color, address: v.address,
-      status: v.status, joinedAt: v.joinedAt, joinedDay: v.joinedDay,
+      status: v.status, joinedAt: v.joinedAt, joinedDay: v.joinedDay, slashed: v.slashed || 0,
       inv: { ...v.inv }, stats: { ...v.stats }, owedFees: v.owed.reduce((t, f) => t + f.amount, 0),
       tradedToday: v.day?.n === this.sim.genesisDay() ? v.day.coins : 0,
       accountUrl: this.sim.chain.accountUrl ? this.sim.chain.accountUrl(v.address) : null,

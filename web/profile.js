@@ -136,7 +136,7 @@ function render(id, state, rel, decisions, econ, rep) {
     <header class="econ-head">
       <div>
         <h2><i class="prof-swatch" style="background:${a.color}"></i>${esc(a.name)}</h2>
-        <p class="mono econ-sub">${esc(role).toUpperCase()}${born ? ` · HERE SINCE DAY ${born.day}` : ''}</p>
+        <p class="mono econ-sub">${esc(role).toUpperCase()}${born ? ` · HERE SINCE DAY ${born.day}` : ''} · <a href="/agent/${encodeURIComponent(a.id)}" target="_blank" rel="noopener" title="Shareable passport: identity, reputation, credit and deals">PASSPORT ↗</a></p>
       </div>
       <button type="button" class="econ-x" data-close aria-label="Close">✕</button>
     </header>

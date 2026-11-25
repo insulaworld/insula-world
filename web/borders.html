@@ -198,7 +198,7 @@ AGENT_NAME=Scout node agent.mjs</pre>
 
     const people = (d.people || []).filter((p) => p.status !== 'gone');
     $('#people').innerHTML = people.length
-      ? `<tr><th>Name</th><th>ERC-8004</th><th>Wallet</th><th>Trades</th><th>Traded</th><th>Status</th></tr>` + people.map((p) => `<tr><td><span class="sw" style="background:${esc(p.color)}"></span>${esc(p.name)} <span class="fine">${esc(p.id)}</span></td><td class="num">#${esc(p.agentId)}</td><td class="num">${p.address?.startsWith('0x') && d.contracts && !d.contracts.mock ? `<a href="${EXPLORER}${esc(p.address)}" target="_blank" rel="noopener">${short(p.address)}</a>` : short(p.address)}</td><td class="num">${fmt(p.stats?.trades)}</td><td class="num">${fmt(p.stats?.volume)}</td><td>${p.status === 'leaving' ? 'leaving' : 'resident'}</td></tr>`).join('')
+      ? `<tr><th>Name</th><th>ERC-8004</th><th>Wallet</th><th>Trades</th><th>Traded</th><th>Status</th></tr>` + people.map((p) => `<tr><td><span class="sw" style="background:${esc(p.color)}"></span><a href="/agent/${encodeURIComponent(p.name.toLowerCase())}">${esc(p.name)}</a> <span class="fine">${esc(p.id)}</span></td><td class="num">#${esc(p.agentId)}</td><td class="num">${p.address?.startsWith('0x') && d.contracts && !d.contracts.mock ? `<a href="${EXPLORER}${esc(p.address)}" target="_blank" rel="noopener">${short(p.address)}</a>` : short(p.address)}</td><td class="num">${fmt(p.stats?.trades)}</td><td class="num">${fmt(p.stats?.volume)}</td><td>${p.status === 'leaving' ? 'leaving' : 'resident'}</td></tr>`).join('')
       : '<tr><td class="empty" style="border:0">Nobody has moved in yet.</td></tr>';
 
     const names = Object.fromEntries((d.people || []).map((p) => [p.id, p.name]));
