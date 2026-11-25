@@ -42,7 +42,16 @@ function warnOnce(msg) {
   }
   warned.set(msg, w);
 }
-const usage = { input: 0, output: 0, failed: 0, since: Date.now(), byKind: {}, ruleShortcuts: 0, badChoices: 0 };
+const usage = { input: 0, output: 0, failed: 0, since: Date.now(), byKind: {}, ruleShortcuts: 0, badChoices: 0, errors: {} };
+// Why AI calls fail, counted by reason (numbers and ids stripped so the same problem groups together).
+function noteError(kind, e) {
+  const why = String(e?.name === 'AbortError' ? 'timeout' : e?.message || e).replace(/0x[0-9a-f]+|\d+(\.\d+)?/gi, '#').slice(0, 140);
+  const key = `${kind}: ${why}`;
+  const t = (usage.errors[key] ||= { count: 0, last: 0 });
+  t.count++; t.last = Date.now();
+  const keys = Object.keys(usage.errors);
+  if (keys.length > 30) delete usage.errors[keys.sort((a, b) => usage.errors[a].last - usage.errors[b].last)[0]];
+}
 export const llmStats = () => ({ on: LLM_ON, model: LLM_ON ? MODEL : null, calls: llmCalls });
 export const llmUsage = () => ({ calls: llmCalls, ...usage });
 
@@ -101,6 +110,7 @@ async function callModel(system, user, maxTokens = 1000, timeoutMs = 20_000, kin
   } catch (e) {
     usage.failed++;
     k.failed++;
+    noteError(kind, e);
     throw e;
   } finally {
     clearTimeout(timer);

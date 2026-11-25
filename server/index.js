@@ -255,6 +255,8 @@ function usageReport() {
     ruleShortcuts: u.ruleShortcuts,
     // AI answers that picked a move not on the menu (the rule brain decided instead).
     badChoices: u.badChoices ?? 0,
+    // Why AI calls failed (by kind and reason), most common first. A failed call falls back to the rule brain.
+    errors: Object.entries(u.errors || {}).sort((a, b) => b[1].count - a[1].count).slice(0, 12).map(([why, v]) => ({ why, count: v.count, last: new Date(v.last).toISOString() })),
     // Where the AI spend goes, by kind of call, most expensive first.
     byKind: Object.fromEntries(Object.entries(u.byKind)
       .map(([k, v]) => [k, { calls: v.calls, failed: v.failed, tokensPerCall: v.calls ? Math.round((v.input + v.output) / v.calls) : 0, cost: +((v.input * pin + v.output * pout) / 1e6).toFixed(4), share: cost ? `${Math.round(((v.input * pin + v.output * pout) / 1e6 / cost) * 100)}%` : null }])
