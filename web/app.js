@@ -609,7 +609,7 @@ function syncZones(state) {
   const open = new Set(state.zones || []);
   for (const z of zoneTags) {
     const era = (state.eras || []).find((e) => e.id === z.zone || (z.zone === 'west' && e.id === 'west') || (z.zone === 'north' && e.id === 'north') || (z.zone === 'farm' && e.id === 'farm'));
-    const text = open.has(z.zone) ? z.label : `${z.label} · opens day ${era ? era.day : '?'}`;
+    const text = open.has(z.zone) ? z.label : `${z.label} · opens day ${era ? era.day + 1 : '?'}`;
     if (z.el.textContent !== text) z.el.textContent = text;
     z.el.classList.toggle('locked', !open.has(z.zone));
   }

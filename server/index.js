@@ -403,7 +403,8 @@ const creditId = (q) => { const s = String(q).trim().replace(/^#/, '').toLowerCa
 app.get('/api/credit', (_req, res) => { res.set('Access-Control-Allow-Origin', '*'); res.json(credit.all()); });
 app.get('/api/credit/:agent', (req, res) => { res.set('Access-Control-Allow-Origin', '*'); const id = creditId(req.params.agent); return id ? res.json(credit.report(id)) : res.status(404).json({ error: 'No animal matches that.' }); });
 const x402 = new X402(sim, SAVE.replace(/\.json$/, '') + '.x402.json'); // paid MCP calls past the free allowance (X402_PAY_TO)
-mountMcp(app, { sim, reputation, validation, identity, relations, leaderboard, findDecision, x402, credit, visitors });
+const passports = new Passports({ sim, identity, reputation, credit, relations, visitors, validation });
+mountMcp(app, { sim, reputation, validation, identity, relations, leaderboard, findDecision, x402, credit, visitors, passports });
 app.get('/mcp-info', (_req, res) => res.sendFile(path.resolve('web/mcp.html')));
 // Open Borders: the rules, who lives here, the offer board and the contracts (live even before it opens).
 app.get('/api/borders', (_req, res) => {
@@ -414,14 +415,32 @@ app.get('/api/borders', (_req, res) => {
 app.get('/borders', (_req, res) => res.sendFile(path.resolve('web/borders.html')));
 // Agent passports: one shareable page per agent (animal or visitor) with its identity, reputation, credit,
 // bond and recent on-chain deals, each linked to the chain.
-const passports = new Passports({ sim, identity, reputation, credit, relations, visitors, validation });
 app.get('/api/passport', (_req, res) => { res.set('Access-Control-Allow-Origin', '*'); res.json({ agents: passports.list() }); });
 app.get('/api/passport/:who', (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   const p = passports.get(req.params.who);
   return p ? res.json(p) : res.status(404).json({ error: 'No agent on Insula matches that name or id.' });
 });
-app.get(['/agent', '/agent/:who'], (_req, res) => res.sendFile(path.resolve('web/agent.html')));
+// The passport page, with link-preview tags filled in for the agent (so a shared link shows its name and record).
+const SITE = (process.env.SITE_URL || 'https://insulaworld.com').replace(/\/$/, '');
+const attr = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const num = (n) => Number(n || 0).toLocaleString('en-US');
+function passportMeta(p) {
+  if (!p) return { title: 'Agent passports · Insula World', desc: 'Every AI agent on Insula has a public passport: on-chain identity, reputation, credit record, bond and recent deals, all checkable on Robinhood Chain.', image: `${SITE}/agents/insula.png`, url: `${SITE}/agent` };
+  const id = p.identity?.agentId ? ` ERC-8004 #${p.identity.agentId} on Robinhood Chain.` : ' On Robinhood Chain.';
+  const desc = p.kind === 'animal'
+    ? `${p.name} the ${p.species}, ${p.job}.` + [[p.reputation?.score != null ? `Reputation ${p.reputation.score}/100 from ${num(p.reputation.count)} ratings` : null, p.credit?.loans ? `credit ${p.credit.grade}, ${num(p.credit.loans)} loans, ${num(p.credit.defaulted)} defaults` : null].filter(Boolean).join(' · ')].map((x) => (x ? ` ${x}.` : '')).join('') + id
+    : `${p.name}, a visiting AI agent. ${num(p.stats?.trades)} trades · ${num(p.stats?.volume)} $INSULA volume · ${p.bond?.locked ? `bond ${num(p.bond.amount)} locked` : 'no bond locked'}${p.bond?.slashed ? `, ${num(p.bond.slashed)} slashed` : ''}.` + id;
+  return { title: `${p.name} · Agent passport · Insula World`, desc, image: p.kind === 'animal' ? `${SITE}${p.portrait}` : `${SITE}/agents/insula.png`, url: `${SITE}/agent/${encodeURIComponent(p.name.toLowerCase())}` };
+}
+app.get(['/agent', '/agent/:who'], (req, res) => {
+  let html;
+  try { html = fs.readFileSync(path.resolve('web/agent.html'), 'utf8'); } catch { return res.status(500).end(); }
+  const m = passportMeta(req.params.who ? passports.get(req.params.who) : null);
+  const tags = `<meta property="og:type" content="profile" /><meta property="og:site_name" content="Insula World" /><meta property="og:title" content="${attr(m.title)}" /><meta property="og:description" content="${attr(m.desc)}" /><meta property="og:image" content="${attr(m.image)}" /><meta property="og:url" content="${attr(m.url)}" /><meta name="twitter:card" content="summary" /><meta name="twitter:site" content="@InsulaWorld" /><meta name="twitter:title" content="${attr(m.title)}" /><meta name="twitter:description" content="${attr(m.desc)}" /><meta name="twitter:image" content="${attr(m.image)}" />`;
+  html = html.replace(/<title>[^<]*<\/title>/, `<title>${attr(m.title)}</title>`).replace(/<meta name="description" content="[^"]*" \/>/, `<meta name="description" content="${attr(m.desc)}" />`).replace('</head>', `${tags}\n</head>`);
+  res.type('html').send(html);
+});
 
 sim.on((e) => { if (e.type === 'chainError') chainErrors++; });
 function gini(xs) {
