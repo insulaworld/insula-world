@@ -22,3 +22,5 @@ push-to-github.bat
 
 # Open Borders test agent state (address + agent id)
 test-visitor.json
+
+.fly-token

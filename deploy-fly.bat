@@ -18,13 +18,17 @@ if errorlevel 1 (
 where flyctl >nul 2>nul
 if errorlevel 1 ( echo Could not install flyctl. See https://fly.io/docs/flyctl/install/ & pause & exit /b 1 )
 
-rem 2. Sign in (opens your browser)
+rem 2. Sign in. If this folder has a .fly-token (an Insula-only deploy token), use it, so deploys work
+rem    whichever Fly account you are signed into. Make one with make-fly-token.bat.
+if exist ".fly-token" ( set /p FLY_API_TOKEN=<.fly-token )
+if defined FLY_API_TOKEN ( echo Using this project's Fly deploy token. & goto signed_in )
 flyctl auth whoami >nul 2>nul
 if errorlevel 1 (
   echo.
   echo Your browser will open to sign in to Fly.io. Come back here when it says you're signed in.
   flyctl auth login
 )
+:signed_in
 
 rem 3. Pack the wallets and settings into Fly secrets (never uploaded as files)
 call npm run secrets
