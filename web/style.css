@@ -93,6 +93,15 @@ body.feed-open .cast-arrow { display: none; }
   display: flex; flex-direction: column; gap: 9px;
 }
 .card .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+#agents .card { cursor: pointer; transition: border-color 0.25s, box-shadow 0.25s; }
+#agents .card.following { border-color: rgba(245, 198, 107, 0.7); box-shadow: 0 0 0 1px rgba(245, 198, 107, 0.35), 0 8px 24px rgba(0, 0, 0, 0.25); }
+/* Outside agents (Open Borders): same card, mint-edged, with their record instead of coins and hunger. */
+.card.visitor { border-color: rgba(143, 240, 193, 0.38); background: linear-gradient(180deg, rgba(143, 240, 193, 0.07), transparent 60%), var(--glass); }
+#agents .card.visitor.following { border-color: rgba(143, 240, 193, 0.85); box-shadow: 0 0 0 1px rgba(143, 240, 193, 0.4), 0 8px 24px rgba(0, 0, 0, 0.25); }
+.card .vbadge { font-size: 9px; letter-spacing: 0.18em; color: var(--mint); border: 1px solid rgba(143, 240, 193, 0.45); border-radius: 999px; padding: 2px 7px; }
+.card.visitor .bal { display: flex; align-items: baseline; flex-wrap: nowrap; white-space: nowrap; }
+.card .bal .vol { font-size: 13px; color: var(--text); margin-left: 12px; }
+.card.visitor .bal { color: var(--mint); }
 .card .who { display: flex; align-items: center; gap: 10px; }
 .card .swatch { width: 26px; height: 26px; border-radius: 7px; box-shadow: inset 0 -6px 0 rgba(0, 0, 0, 0.2); }
 .card .name { font-family: var(--display); font-weight: 500; font-size: 14px; letter-spacing: 0.06em; }

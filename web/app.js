@@ -1152,7 +1152,8 @@ function ensureAgent(a) {
   $('#bubbles').append(bubble, tag);
   const card = document.createElement('div');
   card.className = 'card';
-  if (!a.visitor) $('#agents').appendChild(card); // visitors have no card in the islanders' panel
+  if (a.visitor) card.classList.add('visitor'); // outside agents get a card too, after the islanders
+  $('#agents').appendChild(card);
   const rec = { group, bubble, tag, card, data: a, pos: new THREE.Vector3(a.x, a.y, a.z), heading: a.heading, lastSay: null, lastInv: { ...a.inv }, cardHtml: '' };
   group.position.copy(rec.pos);
   agents.set(a.id, rec);
@@ -1244,7 +1245,7 @@ function applyAgents(state) {
 }
 
 // Open Borders: outside AI agents walking the island (robots with a VISITOR tag). They share the animals'
-// rendering and animation; they just have no card, no camera and no profile.
+// rendering and animation, and get a card and a camera; their profile is their passport page.
 const asVisitor = (v) => ({ ...v, species: v.look || 'robot', accent: '#c9ced6', job: 'visitor', visitor: true, balance: 1e9, hunger: 0 });
 function applyVisitors(state) {
   const here = new Set();
@@ -1255,14 +1256,34 @@ function applyVisitors(state) {
     rec.data = { ...asVisitor(v), x: prev?.visitor && rec.tickAt ? prev.x : v.x, z: prev?.visitor && rec.tickAt ? prev.z : v.z };
     if (!rec.tickAt) Object.assign(rec.data, { x: v.x, z: v.z });
     rec.tag.classList.toggle('leaving', v.status === 'leaving');
+    renderVisitorCard(rec, v);
   }
+  syncCams(state.visitors || []);
   for (const [id, rec] of agents) {
     if (!rec.data.visitor || here.has(id)) continue;
     scene.remove(rec.group);
     rec.tag.remove();
     rec.bubble.remove();
+    rec.card.remove();
+    document.querySelector(`#cams button[data-cam="${id}"]`)?.remove();
+    if (camMode === id) document.querySelector('#cams button[data-cam="orbit"]')?.click();
     agents.delete(id);
   }
+}
+
+// A visitor's card: who it is, what it's doing, what it's carrying, its record here, and its passport.
+// Tap it to follow the visitor with the camera, like an islander.
+function renderVisitorCard(rec, v) {
+  const short = v.address ? `${v.address.slice(0, 4)}…${v.address.slice(-4)}` : '';
+  const items = latest?.items || ['ore', 'fish', 'wood'];
+  const html = `
+    <div class="row"><div class="who"><span class="swatch" style="background:${v.color || '#7BE3A3'}"></span><div><div class="name">${v.name}</div><div class="role">${v.erc8004?.agentId ? `agent #${v.erc8004.agentId}` : 'visitor'}</div></div></div><span class="vbadge mono">${v.status === 'leaving' ? 'LEAVING' : 'VISITOR'}</span></div>
+    <div class="bal">${fmt(v.stats?.trades || 0)}<small>TRADES</small> <span class="vol">${fmt(v.stats?.volume || 0)}<small>VOLUME</small></span></div>
+    <div class="task">${v.task || 'on the island'}</div>
+    <div class="chips">${items.map((i) => `<span>${v.inv?.[i] || 0} ${i}</span>`).join('')}</div>
+    <div class="row">${v.accountUrl ? `<a href="${v.accountUrl}" target="_blank" rel="noopener">${short} ↗</a>` : `<a>${short}</a>`}<a class="prof-btn mono" href="/agent/${encodeURIComponent(v.name.toLowerCase())}" target="_blank" rel="noopener">PASSPORT ↗</a></div>`;
+  if (html !== rec.cardHtml) { rec.card.innerHTML = html; rec.cardHtml = html; }
+  rec.card.classList.toggle('following', camMode === v.id);
 }
 
 $('#ca').addEventListener('click', async () => {
@@ -1776,6 +1797,7 @@ function wireCam(b) {
     camMode = b.dataset.cam;
     document.querySelectorAll('#cams button').forEach((x) => x.classList.toggle('on', x === b));
     controls.autoRotate = camMode === 'orbit' && !REDUCED;
+    for (const [id, r] of agents) r.card?.classList.toggle('following', id === camMode); // the card you're following lights up
   });
 }
 document.querySelectorAll('#cams button').forEach(wireCam);

@@ -810,6 +810,9 @@ export class Visitors {
         moving: Boolean(a.target || a.follow), task: a.task, activity: a.activity || null,
         say: a.say && a.say.until > Date.now() ? a.say.text : null,
         inv: { ...v.inv }, erc8004: { agentId: v.agentId },
+        // For the visitor's card in the cast row.
+        stats: { trades: v.stats?.trades || 0, volume: v.stats?.volume || 0 }, joinedDay: v.joinedDay ?? null,
+        address: v.address || null, accountUrl: v.address ? this.sim.chain.accountUrl?.(v.address) || null : null,
       };
     });
   }
