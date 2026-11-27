@@ -7,7 +7,7 @@ import { Reporter } from './daily.js';
 import { groundY, zoneAt, harborDeck } from './world.js';
 import { relocate, LAYOUT_VERSION } from './layout.js';
 import {
-  AGENT_DEFS, PRICES, MAINLAND, RESOURCES, ITEMS, CARRY, FOOD, LOAN, BUILDINGS, PROJECTS,
+  AGENT_DEFS, PRICES, MAINLAND, EXPORT_FLOOR, RESOURCES, ITEMS, CARRY, FOOD, LOAN, BUILDINGS, PROJECTS,
   HOUSE_HUNGER_SKIP, WORKSHOP_BOOST, START_COINS, upgradeCost,
 } from './agents.js';
 import { ERAS, DEFAULT_DAY_MS } from './eras.js';
@@ -677,6 +677,7 @@ export class Sim {
   // ---------- Main loops ----------
 
   nudgeApart(dt) { this.#separate(dt); } // for tests: the personal-space nudge on its own
+  optionsFor(agent) { return this.#options(agent); } // for tests: what an agent can choose from right now
 
   start() {
     let last = Date.now();
@@ -794,7 +795,7 @@ export class Sim {
     }
     for (const item of items) {
       // A shipment has to be worth at least MIN_SHIP coins: each one is a real transfer that costs gas.
-      if (agent.inv[item] > 0 && agent.inv[item] * this.mainlandPrice(item) >= MIN_SHIP) opts.push({ id: `export:${item}`, action: 'export', item, maxQty: agent.inv[item], label: `ship ${item} to the mainland at ${this.mainlandPrice(item)} each (price drops as more is shipped)` });
+      if (agent.inv[item] > 0 && agent.inv[item] * this.mainlandPrice(item) >= MIN_SHIP && this.mainlandPrice(item) >= PRICES[item].fair * EXPORT_FLOOR) opts.push({ id: `export:${item}`, action: 'export', item, maxQty: agent.inv[item], label: `ship ${item} to the mainland at ${this.mainlandPrice(item)} each (price drops as more is shipped)` });
       const ip = this.importPrice(item);
       if (coins >= ip * 2) opts.push({ id: `import:${item}`, action: 'import', item, maxQty: Math.min(20, Math.floor((coins - 50) / ip)), label: `buy ${item} from the mainland at ${ip} each (always in stock, but pricey)` });
     }
@@ -1098,6 +1099,10 @@ export class Sim {
     if (n2 <= 0) return;
     const price = this.mainlandPrice(item);
     const amount = n2 * price;
+    if (price < PRICES[item].fair * EXPORT_FLOOR) {
+      agent.think(`The mainland's down to ${price} for ${item}. I'm not dumping it that cheap; I'll hold.`, 'HOLD');
+      return;
+    }
     if (amount < MIN_SHIP) {
       agent.think(`The mainland only pays ${price} each now. ${amount} coins isn't worth the boat.`, 'NO SHIP');
       return;

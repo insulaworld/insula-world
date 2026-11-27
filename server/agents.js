@@ -23,6 +23,10 @@ export const PRICES = {
 
 // The mainland (paid by the central bank) buys anything, but below fair value.
 export const MAINLAND = { ore: 18, fish: 7, wood: 6, grain: 5 };
+// No fire sales: when shipping has pushed the mainland's price under this share of fair value, the animals hold
+// their goods instead of dumping them (and value them at no less than this). A full pack (CARRY) of an item they
+// can't sell stops them gathering more of it, so a glut corrects itself instead of crashing the price.
+export const EXPORT_FLOOR = 0.5;
 
 export const CARRY = 8; // most of one item an agent gathers in one trip
 

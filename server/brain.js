@@ -7,7 +7,7 @@
 // With ANTHROPIC_API_KEY set, an LLM makes every decision. Without it, a utility-based
 // fallback brain decides from the same information and writes its reasoning from real numbers.
 
-import { PRICES, MAINLAND, LOAN, CARRY } from './agents.js';
+import { PRICES, MAINLAND, EXPORT_FLOOR, LOAN, CARRY } from './agents.js';
 
 const API_KEY = typeof process !== 'undefined' ? process.env?.ANTHROPIC_API_KEY : undefined;
 const MODEL = (typeof process !== 'undefined' && process.env?.LLM_MODEL) || 'claude-haiku-5-5';
@@ -406,7 +406,7 @@ function valueOf(agent, ctx, item) {
   const fair = PRICES[item].fair;
   if (isFood(item)) return fair * (1 + ctx.self.hunger / 9) * (1 + (1 - Math.min(ctx.self.skills[item], 1.5)) * 0.35);
   if (ctx.role === 'builder' && ctx.myJobs?.some((j) => (j[item] || 0) > 0)) return fair * 1.35;
-  return ml(ctx, item) * 1.25;
+  return Math.max(ml(ctx, item), fair * EXPORT_FLOOR) * 1.25; // a flooded mainland doesn't make goods worthless
 }
 
 function fallbackDecide(agent, ctx, options) {
